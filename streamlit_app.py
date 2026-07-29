@@ -6677,40 +6677,55 @@ class PriceRobot:
         
         return health
 
-
 # ===================================================================
 # БЛОК 15: ИНТЕРФЕЙС STREAMLIT - КОНСТРУКТОР МАППИНГА С ЛОКАЛЬНОЙ ЗАГРУЗКОЙ (ПОЛНЫЙ БЕЗ СОКРАЩЕНИЙ)
 # ===================================================================
-
 def render_mapping_constructor_ui() -> None:
     """Интерфейс конструктора маппинга с локальной загрузкой - ПОЛНОСТЬЮ РАБОЧАЯ ВЕРСИЯ"""
     st.subheader("🛠️ Конструктор маппинга колонок")
     st.markdown("""
-    **📤 ЛОКАЛЬНАЯ ЗАГРУЗКА ПРАЙСОВ**
+**📤 ЛОКАЛЬНАЯ ЗАГРУЗКА ПРАЙСОВ**
+Загрузите файл прайса с компьютера для настройки соответствия колонок.
+Поддерживаются форматы: **XLSX, XLS, CSV, XML, JSON, TXT, ODS**
+""")
     
-    Загрузите файл прайса с компьютера для настройки соответствия колонок.
-    Поддерживаются форматы: **XLSX, XLS, CSV, XML, JSON, TXT, ODS**
-    """)
-    if 'mapping_constructor' not in st.session_state:
-        st.session_state.mapping_constructor = MappingConstructor(
-            st.session_state.config,
-            st.session_state.logger
-        )
+    # ИСПРАВЛЕНИЕ: Добавлена проверка на None
+    if 'mapping_constructor' not in st.session_state or st.session_state.mapping_constructor is None:
+        try:
+            st.session_state.mapping_constructor = MappingConstructor(
+                st.session_state.config,
+                st.session_state.logger
+            )
+        except Exception as e:
+            st.error(f"❌ Ошибка инициализации конструктора маппинга: {e}")
+            st.session_state.mapping_constructor = None
+            return
+    
     mapping_constructor = st.session_state.mapping_constructor
+    
+    # Дополнительная проверка на случай ошибки инициализации
+    if mapping_constructor is None:
+        st.error("❌ Конструктор маппинга не инициализирован")
+        return
+    
     suppliers = st.session_state.config.suppliers
     supplier_names = [s.get('name', 'Unknown') for s in suppliers]
+    
     if not supplier_names:
         st.warning("⚠️ У вас еще нет поставщиков. Создайте поставщика для настройки маппинга.")
+        
         with st.expander("➕ БЫСТРОЕ СОЗДАНИЕ ПОСТАВЩИКА", expanded=True):
             col1, col2 = st.columns(2)
             with col1:
                 new_name = st.text_input("Название поставщика*", key="quick_supplier_name")
                 new_email = st.text_input("Email*", key="quick_supplier_email")
                 new_password = st.text_input("Пароль*", type="password", key="quick_supplier_password")
+            
             with col2:
                 new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key="quick_supplier_imap")
                 new_port = st.number_input("IMAP порт", value=993, step=1, key="quick_supplier_port")
                 new_enabled = st.checkbox("Активен", value=True, key="quick_supplier_enabled")
+            
             if st.button("✅ Создать поставщика", type="primary", use_container_width=True, key="quick_create_supplier_btn"):
                 if not new_name or not new_email or not new_password:
                     st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
@@ -6729,10 +6744,13 @@ def render_mapping_constructor_ui() -> None:
                     st.balloons()
                     time.sleep(1)
                     st.rerun()
+        
         st.info("💡 После создания поставщика обновите страницу или перейдите на вкладку 'Аналитика прайсов' → 'Поставщики' для расширенных настроек.")
         st.divider()
+        
         st.markdown("### 📤 ИЛИ ЗАГРУЗИТЕ ФАЙЛ ДЛЯ ТЕСТИРОВАНИЯ")
         st.caption("Вы можете загрузить файл и посмотреть его структуру, даже без создания поставщика. Маппинг не будет сохранен до создания поставщика.")
+        
         if 'file_loaded_main' not in st.session_state:
             st.session_state.file_loaded_main = False
             st.session_state.file_content_main = None
@@ -6740,32 +6758,40 @@ def render_mapping_constructor_ui() -> None:
             st.session_state.df_main = None
             st.session_state.columns_main = None
             st.session_state.metadata_main = None
+        
         uploaded_file = st.file_uploader(
             "Выберите файл прайса для предпросмотра",
             type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
             help="Загрузите файл прайса для просмотра структуры",
             key="main_file_uploader_no_supplier"
         )
+        
         if uploaded_file is not None:
             try:
                 file_content = uploaded_file.read()
                 file_filename = uploaded_file.name
                 mapping_constructor.save_uploaded_file(file_content, file_filename)
                 st.success(f"✅ Файл загружен: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
+                
                 with st.spinner("Анализ файла..."):
                     df, columns, metadata = mapping_constructor.preview_file(file_content, file_filename)
+                    
                     if df.empty:
                         st.error("❌ Файл пуст или не содержит данных")
                         st.stop()
+                    
                     st.session_state.file_loaded_main = True
                     st.session_state.file_content_main = file_content
                     st.session_state.file_filename_main = file_filename
                     st.session_state.df_main = df
                     st.session_state.columns_main = columns
                     st.session_state.metadata_main = metadata
+                    
                     st.success(f"✅ Файл успешно распарсен: {len(df)} строк, {len(columns)} колонок")
+                    
                     st.subheader("📋 Предпросмотр данных")
                     st.dataframe(df.head(20), use_container_width=True, height=400)
+                    
                     with st.expander("📊 Информация о файле", expanded=True):
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
@@ -6776,6 +6802,7 @@ def render_mapping_constructor_ui() -> None:
                             st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
                         with col4:
                             st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
+                        
                         if metadata.get('column_types'):
                             st.markdown("**Типы колонок (автоопределение):**")
                             type_cols = st.columns(3)
@@ -6790,29 +6817,49 @@ def render_mapping_constructor_ui() -> None:
                                 }.get(col_type, '❓')
                                 with type_cols[i % 3]:
                                     st.markdown(f"{type_emoji} **{col}**: *{col_type}*")
+                    
                     st.info("💡 Чтобы сохранить маппинг, создайте поставщика выше и загрузите файл снова.")
+                    
             except Exception as e:
                 st.error(f"❌ Ошибка загрузки файла: {str(e)}")
                 st.exception(e)
                 st.session_state.file_loaded_main = False
+        
         return
+    
     selected_supplier = st.selectbox(
         "👤 Выберите поставщика для настройки",
         supplier_names,
         key="mapping_supplier_select_main"
     )
+    
     current_mapping = st.session_state.config.get_supplier_mapping(selected_supplier)
-    mapping_stats = mapping_constructor.get_mapping_statistics(selected_supplier)
+    
+    # ИСПРАВЛЕНИЕ: Добавлена проверка на None перед вызовом метода
+    if mapping_constructor is not None:
+        mapping_stats = mapping_constructor.get_mapping_statistics(selected_supplier)
+    else:
+        mapping_stats = {
+            'has_mapping': False,
+            'mapped_fields_count': 0,
+            'total_possible_fields': len(st.session_state.config.column_mapping),
+            'history_count': 0,
+            'last_updated': None,
+            'required_fields_mapped': False
+        }
+    
     if current_mapping and any(current_mapping.values()):
         with st.expander("✅ Текущий маппинг поставщика", expanded=True):
             if mapping_stats['required_fields_mapped']:
                 st.success("🟢 Все обязательные поля настроены")
             else:
                 st.warning("🔴 Обязательные поля не настроены")
+            
             st.markdown(f"**Настроено полей:** {mapping_stats['mapped_fields_count']} из {mapping_stats['total_possible_fields']}")
             st.markdown(f"**Последнее обновление:** {mapping_stats.get('last_updated', 'Никогда')[:19] if mapping_stats.get('last_updated') else 'Никогда'}")
             st.markdown("---")
             st.markdown("**Соответствие колонок:**")
+            
             col1, col2 = st.columns(2)
             mapped_items = [(target, source) for target, source in current_mapping.items() if source]
             for i, (target, source) in enumerate(mapped_items):
@@ -6824,8 +6871,10 @@ def render_mapping_constructor_ui() -> None:
                         st.markdown(f"• **{target}** → `{source}`")
     else:
         st.info("ℹ️ Маппинг для этого поставщика еще не настроен")
+    
     st.divider()
     st.markdown("### 📤 ЗАГРУЗИТЕ ФАЙЛ ПРАЙСА")
+    
     if 'file_loaded_main' not in st.session_state:
         st.session_state.file_loaded_main = False
         st.session_state.file_content_main = None
@@ -6833,38 +6882,47 @@ def render_mapping_constructor_ui() -> None:
         st.session_state.df_main = None
         st.session_state.columns_main = None
         st.session_state.metadata_main = None
+    
     uploaded_file = st.file_uploader(
         "Выберите файл прайса с компьютера",
         type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
         help="Загрузите файл прайса для настройки маппинга",
         key="main_file_uploader"
     )
+    
     if uploaded_file is not None:
         try:
             file_content = uploaded_file.read()
             file_filename = uploaded_file.name
             mapping_constructor.save_uploaded_file(file_content, file_filename)
             st.success(f"✅ Файл загружен: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
+            
             with st.spinner("Анализ файла..."):
                 df, columns, metadata = mapping_constructor.preview_file(file_content, file_filename)
+                
                 if df.empty:
                     st.error("❌ Файл пуст или не содержит данных")
                     st.stop()
+                
                 st.session_state.file_loaded_main = True
                 st.session_state.file_content_main = file_content
                 st.session_state.file_filename_main = file_filename
                 st.session_state.df_main = df
                 st.session_state.columns_main = columns
                 st.session_state.metadata_main = metadata
+                
                 st.success(f"✅ Файл успешно распарсен: {len(df)} строк, {len(columns)} колонок")
+                
         except Exception as e:
             st.error(f"❌ Ошибка загрузки файла: {str(e)}")
             st.exception(e)
             st.session_state.file_loaded_main = False
+    
     if st.session_state.file_loaded_main and st.session_state.df_main is not None:
         df = st.session_state.df_main
         metadata = st.session_state.metadata_main
         columns = st.session_state.columns_main
+        
         with st.expander("📊 Информация о файле", expanded=True):
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -6875,6 +6933,7 @@ def render_mapping_constructor_ui() -> None:
                 st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
             with col4:
                 st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
+            
             if metadata.get('column_types'):
                 st.markdown("**Типы колонок (автоопределение):**")
                 type_cols = st.columns(3)
@@ -6889,6 +6948,7 @@ def render_mapping_constructor_ui() -> None:
                     }.get(col_type, '❓')
                     with type_cols[i % 3]:
                         st.markdown(f"{type_emoji} **{col}**: *{col_type}*")
+        
         st.subheader("📋 Предпросмотр данных")
         preview_rows = st.slider(
             "Количество строк для предпросмотра",
@@ -6903,6 +6963,7 @@ def render_mapping_constructor_ui() -> None:
             use_container_width=True,
             height=400
         )
+        
         with st.expander("📊 Статистика по колонкам"):
             col_stats = []
             for col in df.columns:
@@ -6919,16 +6980,21 @@ def render_mapping_constructor_ui() -> None:
                 use_container_width=True,
                 hide_index=True
             )
+        
         st.divider()
         st.subheader("🎯 Настройка маппинга колонок")
         st.markdown("Выберите, какая колонка в файле соответствует каждому полю:")
+        
         columns_options = [''] + df.columns.tolist()
+        
         def get_column_index(column_name: str) -> int:
             if column_name and column_name in columns_options:
                 return columns_options.index(column_name)
             return 0
+        
         st.markdown("### 📌 Обязательные поля")
         st.markdown("*Поля, отмеченные звёздочкой (*), обязательны для заполнения*")
+        
         col1, col2 = st.columns(2)
         with col1:
             sku_col = st.selectbox(
@@ -6938,6 +7004,7 @@ def render_mapping_constructor_ui() -> None:
                 key="mapping_sku_main",
                 help="Уникальный идентификатор товара"
             )
+        
         with col2:
             price_col = st.selectbox(
                 "💰 Цена *",
@@ -6946,6 +7013,7 @@ def render_mapping_constructor_ui() -> None:
                 key="mapping_price_main",
                 help="Цена товара"
             )
+        
         with st.expander("📦 Основные поля", expanded=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -6970,6 +7038,7 @@ def render_mapping_constructor_ui() -> None:
                     key="mapping_category_main",
                     help="Категория или раздел товара"
                 )
+            
             with col2:
                 name_col = st.selectbox(
                     "📝 Название",
@@ -6992,6 +7061,7 @@ def render_mapping_constructor_ui() -> None:
                     key="mapping_barcode_main",
                     help="Штрихкод или EAN товара"
                 )
+        
         with st.expander("📋 Дополнительные поля", expanded=False):
             col1, col2 = st.columns(2)
             with col1:
@@ -7023,6 +7093,7 @@ def render_mapping_constructor_ui() -> None:
                     key="mapping_currency_main",
                     help="Валюта цены"
                 )
+            
             with col2:
                 dimensions_col = st.selectbox(
                     "📐 Размеры",
@@ -7045,6 +7116,7 @@ def render_mapping_constructor_ui() -> None:
                     key="mapping_vat_main",
                     help="Ставка НДС"
                 )
+        
         if not sku_col or not price_col:
             st.error("❌ **Артикул (SKU)** и **Цена** — обязательные поля! Выберите соответствующие колонки.")
         else:
@@ -7065,19 +7137,26 @@ def render_mapping_constructor_ui() -> None:
                 'currency': currency_col if currency_col else '',
                 'vat': vat_col if vat_col else ''
             }
+            
             new_mapping = {k: v for k, v in new_mapping.items() if v}
+            
             validation = mapping_constructor.validate_mapping(df, new_mapping)
+            
             if not validation.is_valid:
                 st.error("❌ **Ошибки валидации маппинга:**")
                 for error in validation.errors:
                     st.error(f"• {error}")
-            if validation.warnings:
-                st.warning("⚠️ **Предупреждения:**")
-                for warning in validation.warnings:
-                    st.warning(f"• {warning}")
+                
+                if validation.warnings:
+                    st.warning("⚠️ **Предупреждения:**")
+                    for warning in validation.warnings:
+                        st.warning(f"• {warning}")
+            
             if validation.is_valid:
                 st.subheader("🔍 Результат маппинга (предпросмотр)")
+                
                 result_df = mapping_constructor.parser._apply_mapping(df.copy(), new_mapping)
+                
                 if not result_df.empty:
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
@@ -7091,6 +7170,7 @@ def render_mapping_constructor_ui() -> None:
                     with col4:
                         unique_skus = result_df['sku'].nunique()
                         st.metric("🔑 Уникальных SKU", unique_skus)
+                    
                     st.dataframe(
                         result_df.head(20),
                         use_container_width=True,
@@ -7105,6 +7185,7 @@ def render_mapping_constructor_ui() -> None:
                             "description": "Описание"
                         }
                     )
+                    
                     if current_mapping and any(current_mapping.values()):
                         comparison = mapping_constructor.compare_mappings(current_mapping, new_mapping)
                         if comparison['has_changes']:
@@ -7113,6 +7194,7 @@ def render_mapping_constructor_ui() -> None:
                                 st.markdown(f"• Добавлено полей: {comparison['added_fields']}")
                                 st.markdown(f"• Удалено полей: {comparison['removed_fields']}")
                                 st.markdown(f"• Изменено полей: {comparison['modified_fields']}")
+                                
                                 for change in comparison['changes']:
                                     emoji = {
                                         'added': '➕',
@@ -7123,8 +7205,10 @@ def render_mapping_constructor_ui() -> None:
                                         f"{emoji} **{change['field']}**: "
                                         f"`{change['old_value']}` → `{change['new_value']}`"
                                     )
+                    
                     st.divider()
                     st.subheader("💾 Сохранение маппинга")
+                    
                     col1, col2, col3 = st.columns([2, 1, 1])
                     with col1:
                         save_comment = st.text_input(
@@ -7132,6 +7216,7 @@ def render_mapping_constructor_ui() -> None:
                             placeholder="Например: Обновлен маппинг после нового прайса",
                             key="save_comment_main"
                         )
+                    
                     with col2:
                         if st.button("💾 Сохранить маппинг", type="primary", use_container_width=True, key="save_mapping_main"):
                             if mapping_constructor.save_mapping(
@@ -7146,6 +7231,7 @@ def render_mapping_constructor_ui() -> None:
                                 st.rerun()
                             else:
                                 st.error("❌ Ошибка сохранения маппинга")
+                    
                     with col3:
                         if current_mapping and any(current_mapping.values()):
                             if st.button("🔄 Сбросить маппинг", type="secondary", use_container_width=True, key="reset_mapping_main"):
@@ -7163,17 +7249,22 @@ def render_mapping_constructor_ui() -> None:
                                 else:
                                     st.session_state.confirm_reset_main = True
                                     st.warning("⚠️ Нажмите еще раз для подтверждения сброса")
+    
     st.divider()
+    
     extra_tab1, extra_tab2, extra_tab3, extra_tab4 = st.tabs([
         "📧 Загрузка из почты",
         "🔍 Автоопределение",
         "📋 Шаблоны",
         "📜 История"
     ])
+    
     with extra_tab1:
         st.markdown("## 📧 Загрузка прайса из почты поставщика")
         st.markdown("Загрузите файл прайса напрямую из почтового ящика поставщика.")
+        
         email_suppliers = mapping_constructor.get_available_suppliers_for_email()
+        
         if not email_suppliers:
             st.warning("⚠️ Нет поставщиков с настроенной почтой. Добавьте email и пароль в разделе 'Поставщики'.")
             st.info("💡 Вы можете использовать локальную загрузку файла на вкладке '📤 Загрузка и настройка'.")
@@ -7183,6 +7274,7 @@ def render_mapping_constructor_ui() -> None:
                 email_suppliers,
                 key="email_supplier_select"
             )
+            
             max_emails = st.slider(
                 "Максимальное количество писем для проверки",
                 min_value=1,
@@ -7190,116 +7282,137 @@ def render_mapping_constructor_ui() -> None:
                 value=10,
                 key="max_emails_slider"
             )
+            
             if st.button("📧 Загрузить файлы из почты", type="primary", use_container_width=True, key="load_from_email_btn"):
                 with st.spinner(f"Подключение к почте поставщика {email_supplier}..."):
                     try:
                         files = mapping_constructor.load_file_from_email(email_supplier, max_emails)
+                        
                         if not files:
                             st.warning(f"⚠️ Не найдено файлов в почте поставщика {email_supplier}")
                         else:
                             st.success(f"✅ Загружено файлов: {len(files)}")
+                            
                             for i, (content, filename, subject) in enumerate(files):
                                 with st.expander(f"📄 {filename} ({len(content) / 1024:.1f} KB)", expanded=(i == 0)):
                                     st.markdown(f"**Из письма:** {subject[:100]}")
                                     st.markdown(f"**Размер:** {len(content) / 1024:.1f} KB")
+                                    
                                     if st.button("📥 Использовать для настройки", key=f"use_email_file_{i}", use_container_width=True):
                                         st.session_state.file_loaded_main = True
                                         st.session_state.file_content_main = content
                                         st.session_state.file_filename_main = filename
+                                        
                                         with st.spinner("Анализ файла..."):
                                             df, columns, metadata = mapping_constructor.preview_file(content, filename)
                                             st.session_state.df_main = df
                                             st.session_state.columns_main = columns
                                             st.session_state.metadata_main = metadata
+                                        
                                         st.success(f"✅ Файл `{filename}` выбран для настройки.")
                                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Ошибка загрузки из почты: {str(e)}")
+    
     with extra_tab2:
         st.subheader("🔍 Автоматическое определение маппинга")
         st.markdown("""
-        Загрузите файл, и система автоматически определит соответствие колонок
-        на основе анализа содержимого и названий колонок.
-        """)
+Загрузите файл, и система автоматически определит соответствие колонок
+на основе анализа содержимого и названий колонок.
+""")
+        
         auto_file = st.file_uploader(
             "📤 Загрузите файл для автоопределения",
             type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'ods'],
             key="auto_mapping_file_uploader"
         )
+        
         if auto_file is not None:
             try:
                 content = auto_file.read()
                 filename = auto_file.name
                 mapping_constructor.save_uploaded_file(content, filename)
+                
                 with st.spinner("Анализ файла..."):
                     df = mapping_constructor.parser.parse(filename, content)
-                if not df.empty:
-                    st.subheader("📊 Предпросмотр файла")
-                    st.dataframe(df.head(10), use_container_width=True)
-                    with st.spinner("Автоопределение колонок..."):
-                        suggestions = mapping_constructor.get_mapping_suggestions(df)
-                    if suggestions:
-                        st.subheader("💡 Предложенный маппинг")
-                        suggestion_data = []
-                        for s in suggestions:
-                            confidence_emoji = (
-                                '🟢' if s['confidence'] >= 80 else
-                                '🟡' if s['confidence'] >= 50 else
-                                '🟠' if s['confidence'] >= 30 else '🔴'
-                            )
-                            suggestion_data.append({
-                                'Поле': s['target'],
-                                'Колонка в файле': s['column'],
-                                'Уверенность': f"{confidence_emoji} {s['confidence']}%",
-                                'Уровень': s['confidence_level'],
-                                'Причины': '; '.join(s['reasons'])
-                            })
-                        suggestion_df = pd.DataFrame(suggestion_data)
-                        st.dataframe(suggestion_df, use_container_width=True, hide_index=True)
-                        st.subheader("📊 Уверенность определения")
-                        fig = go.Figure()
-                        fig.add_trace(go.Bar(
-                            x=[s['target'] for s in suggestions],
-                            y=[s['confidence'] for s in suggestions],
-                            text=[f"{s['confidence']}%" for s in suggestions],
-                            textposition='outside',
-                            marker_color=[
-                                'green' if s['confidence'] >= 80 else
-                                'yellow' if s['confidence'] >= 50 else
-                                'orange' if s['confidence'] >= 30 else 'red'
-                                for s in suggestions
-                            ]
-                        ))
-                        fig.update_layout(
-                            title='Уверенность автоопределения по полям',
-                            xaxis_title='Поле',
-                            yaxis_title='Уверенность (%)',
-                            yaxis_range=[0, 105],
-                            height=400
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        if st.button("✅ Применить предложенный маппинг", type="primary", use_container_width=True):
-                            auto_mapping = {s['target']: s['column'] for s in suggestions}
-                            if mapping_constructor.save_mapping(
-                                selected_supplier,
-                                auto_mapping,
-                                created_by='auto',
-                                comment='Автоматически определенный маппинг'
-                            ):
-                                st.success("✅ Автоматический маппинг применен!")
-                                st.balloons()
-                                time.sleep(1)
-                                st.rerun()
-                    else:
-                        st.warning("⚠️ Не удалось автоматически определить маппинг")
-                        st.info("💡 Попробуйте настроить маппинг вручную на вкладке '📤 Загрузка и настройка'")
+                    
+                    if not df.empty:
+                        st.subheader("📊 Предпросмотр файла")
+                        st.dataframe(df.head(10), use_container_width=True)
+                        
+                        with st.spinner("Автоопределение колонок..."):
+                            suggestions = mapping_constructor.get_mapping_suggestions(df)
+                            
+                            if suggestions:
+                                st.subheader("💡 Предложенный маппинг")
+                                
+                                suggestion_data = []
+                                for s in suggestions:
+                                    confidence_emoji = (
+                                        '🟢' if s['confidence'] >= 80 else
+                                        '🟡' if s['confidence'] >= 50 else
+                                        '🟠' if s['confidence'] >= 30 else '🔴'
+                                    )
+                                    suggestion_data.append({
+                                        'Поле': s['target'],
+                                        'Колонка в файле': s['column'],
+                                        'Уверенность': f"{confidence_emoji} {s['confidence']}%",
+                                        'Уровень': s['confidence_level'],
+                                        'Причины': '; '.join(s['reasons'])
+                                    })
+                                
+                                suggestion_df = pd.DataFrame(suggestion_data)
+                                st.dataframe(suggestion_df, use_container_width=True, hide_index=True)
+                                
+                                st.subheader("📊 Уверенность определения")
+                                fig = go.Figure()
+                                fig.add_trace(go.Bar(
+                                    x=[s['target'] for s in suggestions],
+                                    y=[s['confidence'] for s in suggestions],
+                                    text=[f"{s['confidence']}%" for s in suggestions],
+                                    textposition='outside',
+                                    marker_color=[
+                                        'green' if s['confidence'] >= 80 else
+                                        'yellow' if s['confidence'] >= 50 else
+                                        'orange' if s['confidence'] >= 30 else 'red'
+                                        for s in suggestions
+                                    ]
+                                ))
+                                fig.update_layout(
+                                    title='Уверенность автоопределения по полям',
+                                    xaxis_title='Поле',
+                                    yaxis_title='Уверенность (%)',
+                                    yaxis_range=[0, 105],
+                                    height=400
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                if st.button("✅ Применить предложенный маппинг", type="primary", use_container_width=True):
+                                    auto_mapping = {s['target']: s['column'] for s in suggestions}
+                                    
+                                    if mapping_constructor.save_mapping(
+                                        selected_supplier,
+                                        auto_mapping,
+                                        created_by='auto',
+                                        comment='Автоматически определенный маппинг'
+                                    ):
+                                        st.success("✅ Автоматический маппинг применен!")
+                                        st.balloons()
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.warning("⚠️ Не удалось автоматически определить маппинг")
+                                        st.info("💡 Попробуйте настроить маппинг вручную на вкладке '📤 Загрузка и настройка'")
             except Exception as e:
                 st.error(f"❌ Ошибка: {str(e)}")
+    
     with extra_tab3:
         st.subheader("📋 Шаблоны маппинга")
         st.markdown("Используйте готовые шаблоны для быстрой настройки маппинга.")
+        
         templates = mapping_constructor.mapping_templates
         template_names = list(templates.keys())
+        
         col1, col2 = st.columns([2, 1])
         with col1:
             selected_template = st.selectbox(
@@ -7307,46 +7420,54 @@ def render_mapping_constructor_ui() -> None:
                 template_names,
                 key="template_select_mapping"
             )
-        if selected_template:
-            template = templates[selected_template]
-            template_descriptions = {
-                'standard': 'Стандартный набор полей для большинства поставщиков',
-                'minimal': 'Минимальный набор (только обязательные поля)',
-                'extended': 'Расширенный набор со всеми возможными полями',
-                'yandex_market': 'Формат Яндекс Маркета',
-                'ozon': 'Формат OZON',
-                'wildberries': 'Формат Wildberries',
-                '1c_export': 'Формат выгрузки из 1С'
-            }
-            description = template_descriptions.get(selected_template, 'Пользовательский шаблон')
-            st.markdown(f"**{description}**")
-            st.write("**Поля шаблона:**")
-            template_data = []
-            for field, column in template.items():
-                template_data.append({
-                    'Поле': field,
-                    'Типовая колонка': column,
-                    'Обязательное': '✅' if field in ['sku', 'price'] else '❌'
-                })
-            st.dataframe(
-                pd.DataFrame(template_data),
-                use_container_width=True,
-                hide_index=True
-            )
-            with col2:
-                if st.button("📥 Применить шаблон", use_container_width=True, key="apply_template_btn"):
-                    if mapping_constructor.save_mapping(
-                        selected_supplier,
-                        template,
-                        created_by='template',
-                        comment=f'Применен шаблон: {selected_template}'
-                    ):
-                        st.success(f"✅ Шаблон '{selected_template}' применен!")
-                        st.balloons()
-                        time.sleep(1)
-                        st.rerun()
+            
+            if selected_template:
+                template = templates[selected_template]
+                
+                template_descriptions = {
+                    'standard': 'Стандартный набор полей для большинства поставщиков',
+                    'minimal': 'Минимальный набор (только обязательные поля)',
+                    'extended': 'Расширенный набор со всеми возможными полями',
+                    'yandex_market': 'Формат Яндекс Маркета',
+                    'ozon': 'Формат OZON',
+                    'wildberries': 'Формат Wildberries',
+                    '1c_export': 'Формат выгрузки из 1С'
+                }
+                
+                description = template_descriptions.get(selected_template, 'Пользовательский шаблон')
+                st.markdown(f"**{description}**")
+                
+                st.write("**Поля шаблона:**")
+                template_data = []
+                for field, column in template.items():
+                    template_data.append({
+                        'Поле': field,
+                        'Типовая колонка': column,
+                        'Обязательное': '✅' if field in ['sku', 'price'] else '❌'
+                    })
+                
+                st.dataframe(
+                    pd.DataFrame(template_data),
+                    use_container_width=True,
+                    hide_index=True
+                )
+        
+        with col2:
+            if st.button("📥 Применить шаблон", use_container_width=True, key="apply_template_btn"):
+                if mapping_constructor.save_mapping(
+                    selected_supplier,
+                    template,
+                    created_by='template',
+                    comment=f'Применен шаблон: {selected_template}'
+                ):
+                    st.success(f"✅ Шаблон '{selected_template}' применен!")
+                    st.balloons()
+                    time.sleep(1)
+                    st.rerun()
+        
         with st.expander("➕ Создать новый шаблон", expanded=False):
             new_template_name = st.text_input("Название нового шаблона", key="new_template_name")
+            
             st.write("Заполните поля шаблона (типовые названия колонок):")
             col1, col2 = st.columns(2)
             with col1:
@@ -7356,6 +7477,7 @@ def render_mapping_constructor_ui() -> None:
                 t_brand = st.text_input("Бренд", value="Бренд", key="t_brand")
                 t_name = st.text_input("Название", value="Название", key="t_name")
                 t_category = st.text_input("Категория", value="Категория", key="t_category")
+            
             with col2:
                 t_description = st.text_input("Описание", value="Описание", key="t_description")
                 t_barcode = st.text_input("Штрихкод", value="Штрихкод", key="t_barcode")
@@ -7363,6 +7485,7 @@ def render_mapping_constructor_ui() -> None:
                 t_country = st.text_input("Страна", value="Страна", key="t_country")
                 t_warranty = st.text_input("Гарантия", value="Гарантия", key="t_warranty")
                 t_dimensions = st.text_input("Размеры", value="Размеры", key="t_dimensions")
+            
             if st.button("💾 Сохранить шаблон", use_container_width=True, key="save_template_btn"):
                 if new_template_name:
                     new_template = {
@@ -7385,15 +7508,18 @@ def render_mapping_constructor_ui() -> None:
                     st.rerun()
                 else:
                     st.error("❌ Введите название шаблона")
+        
         with st.expander("🗑️ Управление пользовательскими шаблонами", expanded=False):
             system_templates = ['standard', 'minimal', 'extended', 'yandex_market', 'ozon', 'wildberries', '1c_export']
             custom_templates = {k: v for k, v in templates.items() if k not in system_templates}
+            
             if custom_templates:
                 template_to_delete = st.selectbox(
                     "Выберите шаблон для удаления",
                     list(custom_templates.keys()),
                     key="delete_template_select"
                 )
+                
                 if st.button("🗑️ Удалить шаблон", type="secondary", use_container_width=True, key="delete_template_btn"):
                     if template_to_delete in mapping_constructor.mapping_templates:
                         del mapping_constructor.mapping_templates[template_to_delete]
@@ -7402,13 +7528,17 @@ def render_mapping_constructor_ui() -> None:
                         st.rerun()
             else:
                 st.info("Нет пользовательских шаблонов")
+    
     with extra_tab4:
         st.subheader("📜 История изменений маппинга")
+        
         if selected_supplier:
             history = st.session_state.config.get_mapping_history(selected_supplier)
+            
             if history:
                 st.markdown(f"**История изменений для поставщика: {selected_supplier}**")
                 st.markdown(f"**Всего версий:** {len(history)}")
+                
                 for record in reversed(history):
                     with st.expander(
                         f"📝 Версия {record.get('version', '?')} — "
@@ -7421,8 +7551,10 @@ def render_mapping_constructor_ui() -> None:
                             st.markdown(f"**Автор:** {record.get('created_by', 'system')}")
                         with col2:
                             st.markdown(f"**Дата:** {record.get('created_at', '')[:19]}")
+                        
                         if record.get('comment'):
                             st.markdown(f"**Комментарий:** {record['comment']}")
+                        
                         if record.get('changes'):
                             st.markdown("**Изменения в этой версии:**")
                             for change in record['changes']:
@@ -7435,6 +7567,7 @@ def render_mapping_constructor_ui() -> None:
                                     f"{emoji} **{change['field']}**: "
                                     f"`{change['old_value']}` → `{change['new_value']}`"
                                 )
+                        
                         if record.get('mapping'):
                             st.markdown("**Итоговый маппинг:**")
                             mapped_fields = {k: v for k, v in record['mapping'].items() if v}
@@ -7447,88 +7580,106 @@ def render_mapping_constructor_ui() -> None:
                                 st.info("Маппинг пуст")
             else:
                 st.info(f"История изменений для поставщика '{selected_supplier}' пуста")
-                st.markdown("""
-                💡 **История появляется при сохранении маппинга.**
-                
-                Попробуйте:
-                1. Загрузить файл прайса
-                2. Настроить маппинг
-                3. Сохранить изменения
-                """)
-        st.divider()
-        st.subheader("📥 Экспорт / Импорт маппинга")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Экспорт маппинга:**")
-            export_format = st.selectbox(
-                "Формат экспорта",
-                ['json', 'csv'],
-                key="export_format_select"
-            )
-            if st.button("📤 Экспортировать", use_container_width=True, key="export_mapping_btn"):
-                if current_mapping and any(current_mapping.values()):
-                    filepath = mapping_constructor.export_mapping_config(selected_supplier, export_format)
-                    if filepath:
-                        with open(filepath, 'rb') as f:
-                            file_data = f.read()
-                        mime_type = "application/json" if export_format == 'json' else "text/csv"
-                        st.download_button(
-                            f"📥 Скачать {export_format.upper()}",
-                            file_data,
-                            f"mapping_{selected_supplier}.{export_format}",
-                            mime_type,
-                            key="download_exported_mapping"
-                        )
-                else:
-                    st.warning("⚠️ Нет маппинга для экспорта")
-        with col2:
-            st.markdown("**Импорт маппинга:**")
-            imported_file = st.file_uploader(
-                "Загрузите файл маппинга",
-                type=['json', 'csv'],
-                key="import_mapping_file_uploader"
-            )
-            if imported_file is not None:
-                temp_dir = Path(st.session_state.config.temp_dir)
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                temp_path = temp_dir / f"import_mapping_{uuid.uuid4().hex}.{imported_file.name.split('.')[-1]}"
-                with open(temp_path, 'wb') as f:
-                    f.write(imported_file.read())
-                imported_mapping = mapping_constructor.import_mapping_config(str(temp_path))
-                if imported_mapping:
-                    st.success("✅ Маппинг успешно импортирован!")
-                    st.markdown("**Импортированные поля:**")
-                    import_df = pd.DataFrame(
-                        [{'Поле': k, 'Колонка': v} for k, v in imported_mapping.items()]
-                    )
-                    st.dataframe(import_df, use_container_width=True, hide_index=True)
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("✅ Применить импортированный маппинг", type="primary", use_container_width=True, key="apply_imported_mapping_btn"):
-                            if mapping_constructor.save_mapping(
-                                selected_supplier,
-                                imported_mapping,
-                                created_by='import',
-                                comment=f'Импортирован из файла {imported_file.name}'
-                            ):
-                                st.success("✅ Маппинг применен!")
-                                st.balloons()
-                                time.sleep(1)
-                                st.rerun()
-                    with col2:
-                        if st.button("❌ Отменить", use_container_width=True, key="cancel_import_mapping_btn"):
-                            st.rerun()
-                else:
-                    st.error("❌ Не удалось импортировать маппинг из файла")
-                try:
-                    temp_path.unlink(missing_ok=True)
-                except:
-                    pass
+        
+        st.markdown("""
+💡 **История появляется при сохранении маппинга.**
+Попробуйте:
+1. Загрузить файл прайса
+2. Настроить маппинг
+3. Сохранить изменения
+""")
+    
     st.divider()
+    st.subheader("📥 Экспорт / Импорт маппинга")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Экспорт маппинга:**")
+        export_format = st.selectbox(
+            "Формат экспорта",
+            ['json', 'csv'],
+            key="export_format_select"
+        )
+        
+        if st.button("📤 Экспортировать", use_container_width=True, key="export_mapping_btn"):
+            if current_mapping and any(current_mapping.values()):
+                filepath = mapping_constructor.export_mapping_config(selected_supplier, export_format)
+                if filepath:
+                    with open(filepath, 'rb') as f:
+                        file_data = f.read()
+                    
+                    mime_type = "application/json" if export_format == 'json' else "text/csv"
+                    
+                    st.download_button(
+                        f"📥 Скачать {export_format.upper()}",
+                        file_data,
+                        f"mapping_{selected_supplier}.{export_format}",
+                        mime_type,
+                        key="download_exported_mapping"
+                    )
+            else:
+                st.warning("⚠️ Нет маппинга для экспорта")
+    
+    with col2:
+        st.markdown("**Импорт маппинга:**")
+        imported_file = st.file_uploader(
+            "Загрузите файл маппинга",
+            type=['json', 'csv'],
+            key="import_mapping_file_uploader"
+        )
+        
+        if imported_file is not None:
+            temp_dir = Path(st.session_state.config.temp_dir)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = temp_dir / f"import_mapping_{uuid.uuid4().hex}.{imported_file.name.split('.')[-1]}"
+            
+            with open(temp_path, 'wb') as f:
+                f.write(imported_file.read())
+            
+            imported_mapping = mapping_constructor.import_mapping_config(str(temp_path))
+            
+            if imported_mapping:
+                st.success("✅ Маппинг успешно импортирован!")
+                st.markdown("**Импортированные поля:**")
+                
+                import_df = pd.DataFrame(
+                    [{'Поле': k, 'Колонка': v} for k, v in imported_mapping.items()]
+                )
+                st.dataframe(import_df, use_container_width=True, hide_index=True)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Применить импортированный маппинг", type="primary", use_container_width=True, key="apply_imported_mapping_btn"):
+                        if mapping_constructor.save_mapping(
+                            selected_supplier,
+                            imported_mapping,
+                            created_by='import',
+                            comment=f'Импортирован из файла {imported_file.name}'
+                        ):
+                            st.success("✅ Маппинг применен!")
+                            st.balloons()
+                            time.sleep(1)
+                            st.rerun()
+                
+                with col2:
+                    if st.button("❌ Отменить", use_container_width=True, key="cancel_import_mapping_btn"):
+                        st.rerun()
+            else:
+                st.error("❌ Не удалось импортировать маппинг из файла")
+            
+            try:
+                temp_path.unlink(missing_ok=True)
+            except:
+                pass
+    
+    st.divider()
+    
     with st.expander("🧹 Очистка временных файлов", expanded=False):
         uploaded_files = mapping_constructor.get_uploaded_files_list()
+        
         if uploaded_files:
             st.markdown(f"**Временных файлов:** {len(uploaded_files)}")
+            
             col1, col2 = st.columns(2)
             with col1:
                 max_age = st.number_input(
@@ -7538,6 +7689,7 @@ def render_mapping_constructor_ui() -> None:
                     max_value=168,
                     key="max_age_hours_input"
                 )
+            
             with col2:
                 if st.button("🧹 Очистить старые файлы", use_container_width=True, key="cleanup_uploads_btn"):
                     cleaned = mapping_constructor.cleanup_old_uploads(max_age)
@@ -7545,7 +7697,6 @@ def render_mapping_constructor_ui() -> None:
                     st.rerun()
         else:
             st.info("Нет временных файлов")
-
 
 # ===================================================================
 # БЛОК 16: ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ИНТЕРФЕЙСА
@@ -7605,8 +7756,17 @@ def init_session_state() -> None:
     if 'auto_refresh' not in st.session_state:
         st.session_state.auto_refresh = False
     
-    if 'mapping_constructor' not in st.session_state:
-        st.session_state.mapping_constructor = None
+    # ИСПРАВЛЕНИЕ: Инициализируем реальный объект, а не None, чтобы избежать ошибки
+    # 'NoneType' object has no attribute 'get_mapping_statistics'
+    if 'mapping_constructor' not in st.session_state or st.session_state.mapping_constructor is None:
+        try:
+            st.session_state.mapping_constructor = MappingConstructor(
+                st.session_state.config,
+                st.session_state.logger
+            )
+        except Exception as e:
+            st.session_state.mapping_constructor = None
+            st.error(f"Ошибка инициализации конструктора маппинга: {e}")
 
 
 def render_dashboard() -> None:
@@ -8375,8 +8535,6 @@ def render_main_content() -> None:
     
     with main_tab5:
         render_logs_tab()
-
-
 # ===================================================================
 # БЛОК 17: ЗАПУСК И УПРАВЛЕНИЕ РОБОТОМ
 # ===================================================================
