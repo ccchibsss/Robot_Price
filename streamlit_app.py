@@ -3864,19 +3864,29 @@ class PriceParser:
 
 # ===================================================================
 # БЛОК 10: РАСШИРЕННЫЙ КОНСТРУКТОР МАППИНГА КОЛОНОК
+# С ПОДДЕРЖКОЙ ЛОКАЛЬНОЙ ЗАГРУЗКИ ФАЙЛОВ И ЗАГРУЗКИ ИЗ ПОЧТЫ
 # ===================================================================
 
 class MappingConstructor:
     """
     Расширенный класс для интерактивного создания маппинга колонок
-    с автоопределением, валидацией и историей изменений
+    с автоопределением, валидацией, историей изменений,
+    поддержкой локальной загрузки файлов и загрузки из почты поставщика
     """
     
     def __init__(self, config: Config, logger: StreamlitLogger):
         self.config = config
         self.logger = logger
         self.parser = PriceParser(config, logger)
+        self.email_downloader = EmailDownloader(config, logger)
         self.mapping_templates: Dict[str, Dict[str, str]] = self._load_templates()
+        
+        # Кэш для хранения загруженных файлов
+        self.uploaded_files_cache: Dict[str, Dict] = {}
+        
+        # Директория для временного хранения загруженных файлов
+        self.upload_dir = Path(config.temp_dir) / 'mapping_uploads'
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
     
     def _load_templates(self) -> Dict[str, Dict[str, str]]:
         """Загрузка шаблонов маппинга"""
@@ -3887,7 +3897,14 @@ class MappingConstructor:
                 'stock': 'Остаток',
                 'brand': 'Бренд',
                 'name': 'Название',
-                'category': 'Категория'
+                'category': 'Категория',
+                'description': 'Описание',
+                'weight': 'Вес',
+                'barcode': 'Штрихкод',
+                'country': 'Страна',
+                'warranty': 'Гарантия',
+                'dimensions': 'Размеры',
+                'min_order_qty': 'Мин. заказ'
             },
             'minimal': {
                 'sku': 'Артикул',
@@ -3903,7 +3920,13 @@ class MappingConstructor:
                 'category': 'Категория',
                 'description': 'Описание',
                 'weight': 'Вес',
-                'barcode': 'Штрихкод'
+                'barcode': 'Штрихкод',
+                'country': 'Страна',
+                'warranty': 'Гарантия',
+                'dimensions': 'Размеры',
+                'min_order_qty': 'Мин. заказ',
+                'currency': 'Валюта',
+                'vat': 'НДС'
             },
             'yandex_market': {
                 'sku': 'offerId',
@@ -3913,7 +3936,12 @@ class MappingConstructor:
                 'name': 'name',
                 'category': 'category',
                 'description': 'description',
-                'barcode': 'barcode'
+                'barcode': 'barcode',
+                'weight': 'weight',
+                'dimensions': 'dimensions',
+                'country': 'country_of_origin',
+                'warranty': 'warranty_days',
+                'vat': 'vat'
             },
             'ozon': {
                 'sku': 'offer_id',
@@ -3923,41 +3951,336 @@ class MappingConstructor:
                 'name': 'name',
                 'category': 'category',
                 'barcode': 'barcode',
-                'weight': 'weight'
+                'weight': 'weight',
+                'dimensions': 'dimensions',
+                'country': 'country',
+                'warranty': 'warranty',
+                'vat': 'vat'
+            },
+            'wildberries': {
+                'sku': 'Артикул',
+                'price': 'Цена',
+                'stock': 'Остаток',
+                'brand': 'Бренд',
+                'name': 'Наименование',
+                'category': 'Категория',
+                'description': 'Описание',
+                'barcode': 'Штрихкод',
+                'weight': 'Вес',
+                'dimensions': 'Габариты',
+                'country': 'Страна',
+                'vat': 'Ставка НДС'
+            },
+            '1c_export': {
+                'sku': 'Код',
+                'price': 'Цена',
+                'stock': 'Остаток',
+                'brand': 'Производитель',
+                'name': 'Наименование',
+                'category': 'Группа',
+                'description': 'Описание',
+                'barcode': 'Штрихкод',
+                'weight': 'Вес',
+                'country': 'СтранаПроисхождения',
+                'warranty': 'Гарантия',
+                'vat': 'СтавкаНДС',
+                'currency': 'Валюта'
             }
         }
         
-        # Загружаем пользовательские шаблоны из файла
+        # Загружаем пользовательские шаблоны из файла если есть
         templates_file = Path(self.config.cache_dir) / 'mapping_templates.json'
         if templates_file.exists():
             try:
                 with open(templates_file, 'r', encoding='utf-8') as f:
                     custom_templates = json.load(f)
                     templates.update(custom_templates)
+                    self.logger.info(f"Загружено {len(custom_templates)} пользовательских шаблонов")
             except Exception as e:
                 self.logger.warning(f"Ошибка загрузки пользовательских шаблонов: {e}")
         
         return templates
     
     def save_templates(self) -> None:
-        """Сохранение шаблонов маппинга"""
+        """Сохранение шаблонов маппинга в файл"""
         templates_file = Path(self.config.cache_dir) / 'mapping_templates.json'
         templates_file.parent.mkdir(parents=True, exist_ok=True)
         
         try:
+            # Сохраняем только пользовательские шаблоны (не системные)
+            system_templates = ['standard', 'minimal', 'extended', 'yandex_market', 'ozon', 'wildberries', '1c_export']
+            custom_templates = {k: v for k, v in self.mapping_templates.items() if k not in system_templates}
+            
             with open(templates_file, 'w', encoding='utf-8') as f:
-                json.dump(self.mapping_templates, f, ensure_ascii=False, indent=2)
+                json.dump(custom_templates, f, ensure_ascii=False, indent=2)
+            
+            self.logger.debug(f"Сохранено {len(custom_templates)} пользовательских шаблонов")
         except Exception as e:
             self.logger.error(f"Ошибка сохранения шаблонов: {e}")
     
+    def save_uploaded_file(self, file_data: bytes, filename: str) -> str:
+        """
+        Сохранение загруженного файла во временную директорию
+        
+        Args:
+            file_data: Бинарные данные файла
+            filename: Имя файла
+            
+        Returns:
+            Путь к сохраненному файлу
+        """
+        # Очищаем имя файла от недопустимых символов
+        safe_filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+        
+        # Добавляем временную метку для уникальности
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        unique_filename = f"{timestamp}_{safe_filename}"
+        
+        filepath = self.upload_dir / unique_filename
+        
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(file_data)
+            
+            self.logger.info(f"Файл сохранен локально: {filepath}")
+            
+            # Сохраняем информацию в кэше
+            self.uploaded_files_cache[unique_filename] = {
+                'original_filename': filename,
+                'filepath': str(filepath),
+                'size': len(file_data),
+                'uploaded_at': datetime.now().isoformat(),
+                'file_format': self.parser.detect_format(filename, file_data).value
+            }
+            
+            return str(filepath)
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка сохранения файла {filename}: {e}")
+            raise
+    
+    def load_file_from_local(self, filepath: str) -> Tuple[bytes, str]:
+        """
+        Загрузка файла с локального диска
+        
+        Args:
+            filepath: Путь к файлу
+            
+        Returns:
+            Кортеж (содержимое файла, имя файла)
+        """
+        filepath = Path(filepath)
+        
+        if not filepath.exists():
+            raise FileNotFoundError(f"Файл не найден: {filepath}")
+        
+        if not filepath.is_file():
+            raise ValueError(f"Указанный путь не является файлом: {filepath}")
+        
+        # Проверяем размер файла
+        file_size = filepath.stat().st_size
+        if file_size == 0:
+            raise ValueError(f"Файл пуст: {filepath}")
+        
+        if file_size > 100 * 1024 * 1024:  # 100 MB
+            raise ValueError(f"Файл слишком большой ({file_size / 1024 / 1024:.1f} MB): {filepath}")
+        
+        try:
+            with open(filepath, 'rb') as f:
+                content = f.read()
+            
+            filename = filepath.name
+            
+            self.logger.info(f"Файл загружен с локального диска: {filename} ({len(content)} байт)")
+            
+            return content, filename
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка чтения локального файла {filepath}: {e}")
+            raise
+    
+    def load_file_from_email(self, supplier_name: str, max_emails: int = 10) -> List[Tuple[bytes, str, str]]:
+        """
+        Загрузка файлов из почты поставщика
+        
+        Args:
+            supplier_name: Имя поставщика
+            max_emails: Максимальное количество писем для проверки
+            
+        Returns:
+            Список кортежей (содержимое, имя файла, тема письма)
+        """
+        supplier = self.config.get_supplier_by_name(supplier_name)
+        
+        if not supplier:
+            raise ValueError(f"Поставщик '{supplier_name}' не найден в конфигурации")
+        
+        if not supplier.email or not supplier.email_password:
+            raise ValueError(f"Для поставщика '{supplier_name}' не указаны email или пароль")
+        
+        # Создаем временный конфиг для подключения к почте поставщика
+        temp_config = Config()
+        temp_config.email_user = supplier.email
+        temp_config.email_pass = supplier.email_password
+        temp_config.imap_server = supplier.imap_server
+        temp_config.imap_port = supplier.imap_port
+        temp_config.email_search_days = self.config.email_search_days
+        temp_config.email_max_emails = max_emails
+        
+        # Создаем временный загрузчик почты
+        email_downloader = EmailDownloader(temp_config, self.logger)
+        
+        files = []
+        
+        try:
+            if not email_downloader.connect():
+                raise ConnectionError(f"Не удалось подключиться к почте поставщика {supplier_name}")
+            
+            # Ищем письма
+            emails = email_downloader.search_emails()
+            
+            if not emails:
+                self.logger.info(f"Нет писем от поставщика {supplier_name}")
+                return files
+            
+            # Скачиваем вложения
+            for email_data in emails[:max_emails]:
+                attachments = email_downloader.download_attachments(email_data)
+                
+                for filename, content, mime_type in attachments:
+                    files.append((content, filename, email_data.get('subject', '')))
+                    
+                    # Сохраняем локально
+                    self.save_uploaded_file(content, filename)
+                    
+                    self.logger.info(
+                        f"Файл загружен из почты поставщика {supplier_name}: "
+                        f"{filename} (из письма: {email_data.get('subject', '')[:50]})"
+                    )
+            
+        finally:
+            email_downloader.disconnect()
+        
+        return files
+    
+    def load_file_from_url(self, url: str, filename: Optional[str] = None) -> Tuple[bytes, str]:
+        """
+        Загрузка файла по URL
+        
+        Args:
+            url: URL файла
+            filename: Имя файла (если не указано, извлекается из URL)
+            
+        Returns:
+            Кортеж (содержимое файла, имя файла)
+        """
+        try:
+            # Определяем имя файла из URL если не указано
+            if filename is None:
+                filename = url.split('/')[-1].split('?')[0]
+                if not filename:
+                    filename = f"downloaded_file_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
+            # Загружаем файл
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=30, stream=True)
+            response.raise_for_status()
+            
+            # Проверяем размер
+            content_length = response.headers.get('content-length')
+            if content_length and int(content_length) > 100 * 1024 * 1024:
+                raise ValueError(f"Файл слишком большой ({int(content_length) / 1024 / 1024:.1f} MB)")
+            
+            content = response.content
+            
+            if len(content) == 0:
+                raise ValueError("Получен пустой файл")
+            
+            # Сохраняем локально
+            self.save_uploaded_file(content, filename)
+            
+            self.logger.info(f"Файл загружен по URL: {filename} ({len(content)} байт)")
+            
+            return content, filename
+            
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Ошибка загрузки файла по URL {url}: {e}")
+            raise
+    
+    def load_sample_from_supplier(self, supplier_name: str) -> Optional[Tuple[bytes, str]]:
+        """
+        Загрузка образца прайса из сохраненных файлов поставщика
+        
+        Args:
+            supplier_name: Имя поставщика
+            
+        Returns:
+            Кортеж (содержимое, имя файла) или None
+        """
+        # Ищем файлы в архиве
+        archive_dir = Path(self.config.archive_dir)
+        if archive_dir.exists():
+            # Ищем файлы, связанные с поставщиком
+            pattern = f"*{supplier_name}*"
+            matching_files = list(archive_dir.glob(pattern))
+            
+            if matching_files:
+                # Берем самый новый файл
+                latest_file = max(matching_files, key=lambda f: f.stat().st_mtime)
+                
+                try:
+                    content = latest_file.read_bytes()
+                    filename = latest_file.name
+                    
+                    self.logger.info(f"Загружен образец из архива: {filename}")
+                    
+                    return content, filename
+                except Exception as e:
+                    self.logger.warning(f"Ошибка чтения файла из архива: {e}")
+        
+        # Ищем в директории загрузок
+        uploads_dir = Path(self.config.uploads_dir)
+        if uploads_dir.exists():
+            matching_files = list(uploads_dir.glob(pattern))
+            
+            if matching_files:
+                latest_file = max(matching_files, key=lambda f: f.stat().st_mtime)
+                
+                try:
+                    content = latest_file.read_bytes()
+                    filename = latest_file.name
+                    
+                    self.logger.info(f"Загружен образец из uploads: {filename}")
+                    
+                    return content, filename
+                except Exception as e:
+                    self.logger.warning(f"Ошибка чтения файла из uploads: {e}")
+        
+        return None
+    
     def preview_file(self, content: bytes, filename: str) -> Tuple[pd.DataFrame, List[str], Dict]:
-        """Расширенный предпросмотр файла с метаданными"""
+        """
+        Расширенный предпросмотр файла с метаданными
+        
+        Args:
+            content: Бинарное содержимое файла
+            filename: Имя файла
+            
+        Returns:
+            Кортеж (DataFrame, список колонок, метаданные)
+        """
         try:
             # Получаем информацию о файле
             file_info = self.parser.get_file_info(content, filename)
             
-            # Парсим файл
+            # Парсим файл (без маппинга, чтобы показать сырые данные)
             df = self.parser.parse(filename, content)
+            
+            # Определяем кодировку если возможно
+            encoding = file_info.get('encoding', 'unknown')
             
             # Получаем метаданные
             metadata = {
@@ -3966,109 +4289,233 @@ class MappingConstructor:
                 'column_count': len(df.columns),
                 'columns': df.columns.tolist(),
                 'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},
-                'sample_values': {}
+                'sample_values': {},
+                'null_counts': {},
+                'unique_counts': {},
+                'encoding': encoding,
+                'file_size_formatted': f"{file_info.get('size', 0) / 1024:.1f} KB"
             }
             
-            # Добавляем примеры значений для каждой колонки
+            # Добавляем примеры значений для каждой колонки (первые 5 непустых)
             for col in df.columns:
                 sample = df[col].dropna().head(5).tolist()
                 metadata['sample_values'][col] = sample
+                
+                # Количество пустых значений
+                null_count = df[col].isna().sum()
+                metadata['null_counts'][col] = int(null_count)
+                
+                # Количество уникальных значений
+                unique_count = df[col].nunique()
+                metadata['unique_counts'][col] = int(unique_count)
+            
+            # Определяем возможные типы колонок
+            column_types = {}
+            for col in df.columns:
+                col_data = df[col].dropna()
+                if len(col_data) == 0:
+                    column_types[col] = 'empty'
+                    continue
+                
+                # Проверяем числовые типы
+                numeric_data = pd.to_numeric(col_data, errors='coerce')
+                numeric_ratio = numeric_data.notna().sum() / len(col_data)
+                
+                if numeric_ratio > 0.9:
+                    if (numeric_data == numeric_data.astype(int)).sum() / len(numeric_data) > 0.9:
+                        column_types[col] = 'integer'
+                    else:
+                        column_types[col] = 'decimal'
+                else:
+                    # Проверяем длину строк
+                    str_data = col_data.astype(str)
+                    avg_length = str_data.str.len().mean()
+                    
+                    if avg_length < 20:
+                        column_types[col] = 'short_text'
+                    elif avg_length < 100:
+                        column_types[col] = 'text'
+                    else:
+                        column_types[col] = 'long_text'
+            
+            metadata['column_types'] = column_types
             
             return df, df.columns.tolist(), metadata
             
         except Exception as e:
-            self.logger.error(f"Ошибка предпросмотра: {e}")
-            return pd.DataFrame(), [], {}
+            self.logger.error(f"Ошибка предпросмотра файла {filename}: {e}")
+            raise
     
     def auto_detect_mapping(self, df: pd.DataFrame) -> Dict[str, str]:
-        """Автоматическое определение маппинга на основе содержимого колонок"""
+        """
+        Автоматическое определение маппинга на основе содержимого колонок
+        
+        Args:
+            df: DataFrame с данными
+            
+        Returns:
+            Словарь маппинга {целевое_поле: колонка_в_файле}
+        """
         mapping = {}
         columns = df.columns.tolist()
         
-        # Функция для проверки, похожа ли колонка на определенный тип
-        def is_price_column(col_data: pd.Series) -> bool:
-            """Проверка, является ли колонка ценой"""
-            numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
-            if len(numeric_data) < len(col_data) * 0.5:
-                return False
-            
-            # Цены обычно в определенном диапазоне
-            mean_val = numeric_data.mean()
-            if mean_val <= 0 or mean_val > 10000000:
-                return False
-            
-            # Проверяем наличие десятичных знаков
-            decimal_count = sum(1 for x in numeric_data if '.' in str(x))
-            return decimal_count > len(numeric_data) * 0.3
+        # Функция для проверки, является ли колонка числовой
+        def get_numeric_ratio(col_data: pd.Series) -> float:
+            """Возвращает долю числовых значений в колонке"""
+            numeric_data = pd.to_numeric(col_data, errors='coerce')
+            return numeric_data.notna().sum() / len(col_data) if len(col_data) > 0 else 0
         
-        def is_stock_column(col_data: pd.Series) -> bool:
-            """Проверка, является ли колонка остатком"""
+        # Функция для проверки, является ли колонка целочисленной
+        def is_integer_column(col_data: pd.Series) -> bool:
+            """Проверяет, содержит ли колонка только целые числа"""
             numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
-            if len(numeric_data) < len(col_data) * 0.5:
+            if len(numeric_data) == 0:
                 return False
-            
-            # Остатки обычно целые числа и не слишком большие
-            if numeric_data.mean() > 100000:
-                return False
-            
-            # Проверяем, что значения целые
-            int_count = sum(1 for x in numeric_data if x == int(x))
-            return int_count > len(numeric_data) * 0.8
+            return (numeric_data == numeric_data.astype(int)).sum() / len(numeric_data) > 0.95
         
-        def is_sku_column(col_data: pd.Series) -> bool:
-            """Проверка, является ли колонка артикулом"""
-            str_data = col_data.astype(str).dropna()
-            if len(str_data) < len(col_data) * 0.5:
-                return False
-            
-            # Артикулы обычно короткие и уникальные
-            avg_length = str_data.str.len().mean()
-            if avg_length < 3 or avg_length > 50:
-                return False
-            
-            # Проверяем уникальность
-            uniqueness = str_data.nunique() / len(str_data)
-            return uniqueness > 0.5
+        # Функция для проверки уникальности
+        def get_uniqueness(col_data: pd.Series) -> float:
+            """Возвращает долю уникальных значений"""
+            non_null = col_data.dropna()
+            if len(non_null) == 0:
+                return 0
+            return non_null.nunique() / len(non_null)
+        
+        # Функция для проверки средней длины строки
+        def get_avg_length(col_data: pd.Series) -> float:
+            """Возвращает среднюю длину строковых значений"""
+            str_data = col_data.dropna().astype(str)
+            if len(str_data) == 0:
+                return 0
+            return str_data.str.len().mean()
         
         # Сначала ищем по названиям колонок
         for target, variants in self.config.column_mapping.items():
+            best_match = None
+            best_score = 0
+            
             for col in columns:
                 col_lower = col.lower().strip()
+                score = 0
+                
                 for variant in variants:
-                    if variant in col_lower or col_lower in variant:
-                        mapping[target] = col
+                    variant_lower = variant.lower()
+                    
+                    # Точное совпадение
+                    if col_lower == variant_lower:
+                        score = 100
                         break
-                if target in mapping:
-                    break
+                    
+                    # Содержит вариант
+                    if variant_lower in col_lower:
+                        score = max(score, 85)
+                    
+                    # Вариант содержит название колонки
+                    if col_lower in variant_lower:
+                        score = max(score, 75)
+                    
+                    # Частичное совпадение (по словам)
+                    col_words = set(col_lower.replace('_', ' ').split())
+                    variant_words = set(variant_lower.replace('_', ' ').split())
+                    common_words = col_words & variant_words
+                    if common_words:
+                        score = max(score, 60 + len(common_words) * 10)
+                
+                if score > best_score and score > 50:
+                    best_score = score
+                    best_match = col
+            
+            if best_match:
+                mapping[target] = best_match
         
         # Для ненайденных колонок пробуем определить по содержимому
         unmapped_columns = [col for col in columns if col not in mapping.values()]
         
         for col in unmapped_columns:
             col_data = df[col]
+            numeric_ratio = get_numeric_ratio(col_data)
+            uniqueness = get_uniqueness(col_data)
+            avg_length = get_avg_length(col_data)
             
-            if 'price' not in mapping and is_price_column(col_data):
-                mapping['price'] = col
-            elif 'stock' not in mapping and is_stock_column(col_data):
-                mapping['stock'] = col
-            elif 'sku' not in mapping and is_sku_column(col_data):
-                mapping['sku'] = col
+            # Определяем цену
+            if 'price' not in mapping and numeric_ratio > 0.8:
+                numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
+                if len(numeric_data) > 0:
+                    mean_val = numeric_data.mean()
+                    # Цены обычно положительные и не слишком большие
+                    if 0 < mean_val < 10000000:
+                        # Проверяем, есть ли десятичные знаки
+                        has_decimals = any('.' in str(x) for x in numeric_data.head(20))
+                        if has_decimals or not is_integer_column(col_data):
+                            mapping['price'] = col
+                            continue
+            
+            # Определяем остаток
+            if 'stock' not in mapping and numeric_ratio > 0.8:
+                numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
+                if len(numeric_data) > 0:
+                    mean_val = numeric_data.mean()
+                    # Остатки обычно целые и не слишком большие
+                    if 0 <= mean_val < 100000 and is_integer_column(col_data):
+                        mapping['stock'] = col
+                        continue
+            
+            # Определяем артикул
+            if 'sku' not in mapping and uniqueness > 0.5 and avg_length < 30:
+                # Артикулы обычно короткие и уникальные
+                if uniqueness > 0.7 or (uniqueness > 0.5 and avg_length < 15):
+                    mapping['sku'] = col
+                    continue
+            
+            # Определяем название
+            if 'name' not in mapping and avg_length > 20 and uniqueness > 0.5:
+                mapping['name'] = col
+                continue
+            
+            # Определяем описание
+            if 'description' not in mapping and avg_length > 50:
+                mapping['description'] = col
+                continue
+            
+            # Определяем вес
+            if 'weight' not in mapping and numeric_ratio > 0.8:
+                numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
+                if len(numeric_data) > 0:
+                    mean_val = numeric_data.mean()
+                    # Вес обычно положительный и небольшой
+                    if 0 < mean_val < 1000:
+                        mapping['weight'] = col
+                        continue
         
         return mapping
     
     def create_mapping(self, df: pd.DataFrame, selected_columns: Dict[str, str],
                       template_name: Optional[str] = None) -> Dict[str, str]:
-        """Создание маппинга с возможностью использования шаблонов"""
-        # Если указан шаблон, применяем его
+        """
+        Создание маппинга с возможностью использования шаблонов
+        
+        Args:
+            df: DataFrame с данными
+            selected_columns: Словарь выбранных пользователем колонок
+            template_name: Имя шаблона (опционально)
+            
+        Returns:
+            Словарь маппинга
+        """
+        # Если указан шаблон, применяем его как основу
         if template_name and template_name in self.mapping_templates:
-            template = self.mapping_templates[template_name]
-            # Объединяем шаблон с выбранными колонками
+            template = self.mapping_templates[template_name].copy()
+            # Объединяем шаблон с выбранными колонками (выбранные имеют приоритет)
             mapping = template.copy()
             for target, source in selected_columns.items():
                 if source and source in df.columns:
                     mapping[target] = source
+                elif source == '':
+                    # Явно удаляем поле из маппинга если выбрана пустая строка
+                    if target in mapping:
+                        del mapping[target]
         else:
-            # Создаем новый маппинг
+            # Создаем новый маппинг из выбранных колонок
             mapping = {}
             for target, source in selected_columns.items():
                 if source and source in df.columns:
@@ -4077,20 +4524,28 @@ class MappingConstructor:
         return mapping
     
     def validate_mapping(self, df: pd.DataFrame, mapping: Dict[str, str]) -> ValidationResult:
-        """Валидация маппинга"""
+        """
+        Расширенная валидация маппинга
+        
+        Args:
+            df: DataFrame с данными
+            mapping: Словарь маппинга
+            
+        Returns:
+            ValidationResult с результатами валидации
+        """
         result = ValidationResult()
         
         # Проверяем обязательные поля
-        if not mapping.get('sku'):
-            result.add_error("Не указан маппинг для артикула (sku)")
-        
-        if not mapping.get('price'):
-            result.add_error("Не указан маппинг для цены (price)")
+        required_fields = ['sku', 'price']
+        for field in required_fields:
+            if not mapping.get(field):
+                result.add_error(f"Не указан маппинг для обязательного поля: {field}")
         
         # Проверяем существование колонок
         for target, source in mapping.items():
             if source and source not in df.columns:
-                result.add_error(f"Колонка '{source}' (для {target}) не найдена в файле")
+                result.add_error(f"Колонка '{source}' (для поля '{target}') не найдена в файле")
         
         if not result.is_valid:
             return result
@@ -4104,26 +4559,62 @@ class MappingConstructor:
                 return result
             
             # Проверяем качество данных
-            if 'price' in mapped_df.columns:
-                zero_prices = (mapped_df['price'] == 0).sum()
-                if zero_prices > 0:
-                    result.add_warning(f"Найдено {zero_prices} нулевых цен")
-                
-                invalid_prices = mapped_df['price'].isna().sum()
-                if invalid_prices > 0:
-                    result.add_error(f"Найдено {invalid_prices} некорректных цен")
-            
             if 'sku' in mapped_df.columns:
-                empty_sku = (mapped_df['sku'] == '').sum()
-                if empty_sku > 0:
-                    result.add_warning(f"Найдено {empty_sku} пустых артикулов")
-                
+                total_rows = len(mapped_df)
+                empty_sku = (mapped_df['sku'].isna() | (mapped_df['sku'] == '')).sum()
                 duplicate_sku = mapped_df['sku'].duplicated().sum()
+                
+                if empty_sku > 0:
+                    result.add_warning(f"Найдено {empty_sku} пустых артикулов ({empty_sku / total_rows * 100:.1f}%)")
+                
                 if duplicate_sku > 0:
                     result.add_warning(f"Найдено {duplicate_sku} дубликатов артикулов")
+                
+                result.statistics['total_rows'] = total_rows
+                result.statistics['valid_skus'] = total_rows - empty_sku
+                result.statistics['unique_skus'] = mapped_df['sku'].nunique()
             
-            result.statistics['mapped_columns'] = list(mapping.keys())
+            if 'price' in mapped_df.columns:
+                total_rows = len(mapped_df)
+                zero_prices = (mapped_df['price'] == 0).sum()
+                invalid_prices = mapped_df['price'].isna().sum()
+                negative_prices = (mapped_df['price'] < 0).sum()
+                
+                if invalid_prices > 0:
+                    result.add_error(f"Найдено {invalid_prices} некорректных цен")
+                
+                if zero_prices > 0:
+                    result.add_warning(f"Найдено {zero_prices} нулевых цен ({zero_prices / total_rows * 100:.1f}%)")
+                
+                if negative_prices > 0:
+                    result.add_warning(f"Найдено {negative_prices} отрицательных цен")
+                
+                valid_prices = mapped_df[mapped_df['price'] > 0]['price']
+                if len(valid_prices) > 0:
+                    result.statistics['price_range'] = {
+                        'min': float(valid_prices.min()),
+                        'max': float(valid_prices.max()),
+                        'mean': float(valid_prices.mean()),
+                        'median': float(valid_prices.median())
+                    }
+            
+            if 'stock' in mapped_df.columns:
+                negative_stock = (mapped_df['stock'] < 0).sum()
+                if negative_stock > 0:
+                    result.add_warning(f"Найдено {negative_stock} отрицательных остатков")
+                
+                total_stock = int(mapped_df['stock'].sum())
+                with_stock = int((mapped_df['stock'] > 0).sum())
+                result.statistics['stock_stats'] = {
+                    'total': total_stock,
+                    'with_stock': with_stock,
+                    'without_stock': len(mapped_df) - with_stock
+                }
+            
+            result.statistics['mapped_fields'] = list(mapping.keys())
             result.statistics['valid_rows'] = len(mapped_df)
+            result.statistics['total_columns_in_file'] = len(df.columns)
+            result.statistics['mapped_columns_count'] = len(mapping)
             
         except Exception as e:
             result.add_error(f"Ошибка применения маппинга: {str(e)}")
@@ -4132,103 +4623,187 @@ class MappingConstructor:
     
     def save_mapping(self, supplier_name: str, mapping: Dict[str, str],
                     created_by: str = 'user', comment: str = '') -> bool:
-        """Сохранение маппинга для поставщика с историей"""
+        """
+        Сохранение маппинга для поставщика с историей
+        
+        Args:
+            supplier_name: Имя поставщика
+            mapping: Словарь маппинга
+            created_by: Кто создал (user, auto, template, import)
+            comment: Комментарий к изменению
+            
+        Returns:
+            True если сохранение успешно
+        """
         return self.config.set_supplier_mapping(supplier_name, mapping, created_by, comment)
     
     def get_mapping_suggestions(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Получение предложений по маппингу с оценкой уверенности"""
+        """
+        Получение предложений по маппингу с оценкой уверенности
+        
+        Args:
+            df: DataFrame с данными
+            
+        Returns:
+            Список предложений с оценками уверенности
+        """
         suggestions = []
         
         for target, variants in self.config.column_mapping.items():
             best_match = None
             best_score = 0
-            best_reason = ''
+            best_reasons = []
             
             for col in df.columns:
                 col_lower = col.lower().strip()
+                col_data = df[col].dropna()
+                
+                if len(col_data) == 0:
+                    continue
+                
                 score = 0
                 reasons = []
                 
-                # Проверка по названию
+                # Проверка по названию колонки
                 for variant in variants:
-                    if variant == col_lower:
-                        score = 100
-                        reasons.append(f'Точное совпадение: {variant}')
+                    variant_lower = variant.lower()
+                    
+                    if variant_lower == col_lower:
+                        score += 50
+                        reasons.append(f'Точное совпадение названия: "{variant}"')
                         break
-                    elif variant in col_lower:
-                        score = max(score, 80)
-                        reasons.append(f'Содержит: {variant}')
-                    elif col_lower in variant:
-                        score = max(score, 70)
-                        reasons.append(f'Часть от: {variant}')
+                    elif variant_lower in col_lower:
+                        score += 40
+                        reasons.append(f'Содержит: "{variant}"')
+                    elif col_lower in variant_lower:
+                        score += 35
+                        reasons.append(f'Часть от: "{variant}"')
+                    
+                    # Проверка по словам
+                    col_words = set(col_lower.replace('_', ' ').replace('-', ' ').split())
+                    variant_words = set(variant_lower.replace('_', ' ').replace('-', ' ').split())
+                    common = col_words & variant_words
+                    if common:
+                        score += len(common) * 15
+                        reasons.append(f'Общие слова: {", ".join(common)}')
                 
-                # Дополнительные проверки по содержимому
-                col_data = df[col].dropna()
-                if len(col_data) > 0:
-                    if target == 'price':
-                        numeric_ratio = pd.to_numeric(col_data, errors='coerce').notna().mean()
-                        if numeric_ratio > 0.8:
-                            score += 15
-                            reasons.append('Числовые значения (>80%)')
-                    
-                    elif target == 'sku':
-                        str_data = col_data.astype(str)
-                        uniqueness = str_data.nunique() / len(str_data)
-                        if uniqueness > 0.7:
-                            score += 10
-                            reasons.append(f'Высокая уникальность ({uniqueness:.1%})')
-                    
-                    elif target == 'stock':
-                        numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
-                        if len(numeric_data) > 0:
-                            if numeric_data.mean() < 10000 and (numeric_data == numeric_data.astype(int)).mean() > 0.9:
-                                score += 10
+                # Проверка по содержимому колонки
+                numeric_ratio = 0
+                try:
+                    numeric_data = pd.to_numeric(col_data, errors='coerce')
+                    numeric_ratio = numeric_data.notna().sum() / len(col_data)
+                except:
+                    pass
+                
+                uniqueness = col_data.nunique() / len(col_data) if len(col_data) > 0 else 0
+                avg_length = col_data.astype(str).str.len().mean() if len(col_data) > 0 else 0
+                
+                if target == 'price' and numeric_ratio > 0.8:
+                    mean_val = pd.to_numeric(col_data, errors='coerce').mean()
+                    if 0 < mean_val < 10000000:
+                        score += 30
+                        reasons.append('Похоже на цены (числовые значения)')
+                
+                elif target == 'stock' and numeric_ratio > 0.8:
+                    numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
+                    if len(numeric_data) > 0:
+                        if (numeric_data == numeric_data.astype(int)).mean() > 0.9:
+                            mean_val = numeric_data.mean()
+                            if mean_val < 100000:
+                                score += 25
                                 reasons.append('Похоже на остатки (целые числа)')
+                
+                elif target == 'sku' and uniqueness > 0.5 and avg_length < 30:
+                    score += 20
+                    reasons.append(f'Похоже на артикулы (уникальность: {uniqueness:.1%})')
+                
+                elif target == 'name' and avg_length > 20 and uniqueness > 0.5:
+                    score += 15
+                    reasons.append(f'Похоже на названия (средняя длина: {avg_length:.0f})')
+                
+                elif target == 'description' and avg_length > 50:
+                    score += 15
+                    reasons.append(f'Похоже на описания (средняя длина: {avg_length:.0f})')
+                
+                elif target == 'weight' and numeric_ratio > 0.8:
+                    mean_val = pd.to_numeric(col_data, errors='coerce').mean()
+                    if 0 < mean_val < 1000:
+                        score += 15
+                        reasons.append('Похоже на вес (небольшие числа)')
                 
                 if score > best_score:
                     best_score = score
                     best_match = col
-                    best_reason = '; '.join(reasons)
+                    best_reasons = reasons
             
-            if best_match and best_score > 30:
+            if best_match and best_score >= 30:
                 suggestions.append({
                     'target': target,
                     'column': best_match,
-                    'confidence': best_score,
-                    'reason': best_reason
+                    'confidence': min(best_score, 100),
+                    'reasons': best_reasons,
+                    'confidence_level': (
+                        'high' if best_score >= 70 else
+                        'medium' if best_score >= 50 else
+                        'low'
+                    )
                 })
         
+        # Сортируем по уверенности
         return sorted(suggestions, key=lambda x: x['confidence'], reverse=True)
     
     def compare_mappings(self, mapping1: Dict[str, str], mapping2: Dict[str, str]) -> Dict:
-        """Сравнение двух маппингов"""
+        """
+        Сравнение двух маппингов
+        
+        Args:
+            mapping1: Первый маппинг
+            mapping2: Второй маппинг
+            
+        Returns:
+            Словарь с информацией об изменениях
+        """
         all_keys = set(list(mapping1.keys()) + list(mapping2.keys()))
         
         changes = []
-        for key in all_keys:
+        for key in sorted(all_keys):
             old_value = mapping1.get(key, '')
             new_value = mapping2.get(key, '')
             
             if old_value != new_value:
+                change_type = 'modified'
+                if old_value == '' and new_value != '':
+                    change_type = 'added'
+                elif old_value != '' and new_value == '':
+                    change_type = 'removed'
+                
                 changes.append({
                     'field': key,
-                    'old_value': old_value,
-                    'new_value': new_value,
-                    'changed': old_value != '' and new_value != '',
-                    'added': old_value == '' and new_value != '',
-                    'removed': old_value != '' and new_value == ''
+                    'old_value': old_value or '(не задано)',
+                    'new_value': new_value or '(не задано)',
+                    'change_type': change_type
                 })
         
         return {
             'changes': changes,
             'total_changes': len(changes),
-            'added_fields': sum(1 for c in changes if c['added']),
-            'removed_fields': sum(1 for c in changes if c['removed']),
-            'modified_fields': sum(1 for c in changes if c['changed'])
+            'added_fields': sum(1 for c in changes if c['change_type'] == 'added'),
+            'removed_fields': sum(1 for c in changes if c['change_type'] == 'removed'),
+            'modified_fields': sum(1 for c in changes if c['change_type'] == 'modified'),
+            'has_changes': len(changes) > 0
         }
     
     def export_mapping_config(self, supplier_name: str, format: str = 'json') -> str:
-        """Экспорт конфигурации маппинга"""
+        """
+        Экспорт конфигурации маппинга в файл
+        
+        Args:
+            supplier_name: Имя поставщика
+            format: Формат экспорта ('json' или 'csv')
+            
+        Returns:
+            Путь к экспортированному файлу
+        """
         mapping = self.config.get_supplier_mapping(supplier_name)
         if not mapping:
             return ''
@@ -4246,7 +4821,8 @@ class MappingConstructor:
                 'supplier': supplier_name,
                 'mapping': mapping,
                 'exported_at': datetime.now().isoformat(),
-                'version': self.config.config_version
+                'version': self.config.config_version,
+                'template_compatible': True
             }
             
             with open(filepath, 'w', encoding='utf-8') as f:
@@ -4260,37 +4836,177 @@ class MappingConstructor:
             
             with open(filepath, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['Поле', 'Колонка в файле'])
+                writer.writerow(['Поле', 'Колонка в файле', 'Описание'])
+                
+                field_descriptions = {
+                    'sku': 'Артикул товара',
+                    'price': 'Цена',
+                    'stock': 'Остаток',
+                    'brand': 'Бренд',
+                    'name': 'Название',
+                    'category': 'Категория',
+                    'description': 'Описание',
+                    'weight': 'Вес',
+                    'barcode': 'Штрихкод',
+                    'country': 'Страна производства',
+                    'warranty': 'Гарантия',
+                    'dimensions': 'Размеры',
+                    'min_order_qty': 'Минимальный заказ',
+                    'currency': 'Валюта',
+                    'vat': 'НДС'
+                }
+                
                 for target, source in mapping.items():
-                    writer.writerow([target, source])
+                    description = field_descriptions.get(target, '')
+                    writer.writerow([target, source, description])
             
             return str(filepath)
         
         return ''
     
     def import_mapping_config(self, filepath: str) -> Optional[Dict[str, str]]:
-        """Импорт конфигурации маппинга из файла"""
+        """
+        Импорт конфигурации маппинга из файла
+        
+        Args:
+            filepath: Путь к файлу
+            
+        Returns:
+            Словарь маппинга или None
+        """
         try:
-            if filepath.endswith('.json'):
+            filepath = Path(filepath)
+            
+            if not filepath.exists():
+                self.logger.error(f"Файл не найден: {filepath}")
+                return None
+            
+            if filepath.suffix == '.json':
                 with open(filepath, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    return data.get('mapping', {})
+                    
+                    # Поддерживаем разные форматы JSON
+                    if 'mapping' in data:
+                        return data['mapping']
+                    elif isinstance(data, dict):
+                        # Может быть сам маппинг
+                        if all(isinstance(v, str) for v in data.values()):
+                            return data
             
-            elif filepath.endswith('.csv'):
+            elif filepath.suffix == '.csv':
                 mapping = {}
                 with open(filepath, 'r', encoding='utf-8') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        field = row.get('Поле', row.get('field', ''))
-                        column = row.get('Колонка в файле', row.get('column', ''))
+                        field = row.get('Поле', row.get('field', row.get('target', '')))
+                        column = row.get('Колонка в файле', row.get('column', row.get('source', '')))
                         if field and column:
                             mapping[field] = column
-                return mapping
+                
+                if mapping:
+                    return mapping
+            
+            self.logger.error(f"Не удалось импортировать маппинг из файла: {filepath}")
+            return None
             
         except Exception as e:
             self.logger.error(f"Ошибка импорта маппинга: {e}")
+            return None
+    
+    def get_available_suppliers_for_email(self) -> List[str]:
+        """
+        Получение списка поставщиков, у которых настроена почта
         
-        return None
+        Returns:
+            Список имен поставщиков
+        """
+        suppliers = []
+        for supplier_data in self.config.suppliers:
+            if supplier_data.get('email') and supplier_data.get('email_password'):
+                suppliers.append(supplier_data.get('name', 'Unknown'))
+        return suppliers
+    
+    def get_uploaded_files_list(self) -> List[Dict]:
+        """
+        Получение списка загруженных файлов
+        
+        Returns:
+            Список словарей с информацией о файлах
+        """
+        files = []
+        
+        if self.upload_dir.exists():
+            for filepath in sorted(self.upload_dir.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True):
+                if filepath.is_file():
+                    files.append({
+                        'filename': filepath.name,
+                        'size': filepath.stat().st_size,
+                        'size_formatted': f"{filepath.stat().st_size / 1024:.1f} KB",
+                        'uploaded_at': datetime.fromtimestamp(filepath.stat().st_mtime).isoformat(),
+                        'filepath': str(filepath)
+                    })
+        
+        return files
+    
+    def cleanup_old_uploads(self, max_age_hours: int = 24) -> int:
+        """
+        Очистка старых загруженных файлов
+        
+        Args:
+            max_age_hours: Максимальный возраст файла в часах
+            
+        Returns:
+            Количество удаленных файлов
+        """
+        cleaned = 0
+        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+        
+        if self.upload_dir.exists():
+            for filepath in self.upload_dir.iterdir():
+                if filepath.is_file():
+                    mtime = datetime.fromtimestamp(filepath.stat().st_mtime)
+                    if mtime < cutoff_time:
+                        try:
+                            filepath.unlink()
+                            cleaned += 1
+                        except Exception as e:
+                            self.logger.warning(f"Не удалось удалить файл {filepath}: {e}")
+        
+        # Очищаем кэш
+        self.uploaded_files_cache.clear()
+        
+        if cleaned > 0:
+            self.logger.info(f"Очищено {cleaned} старых загруженных файлов")
+        
+        return cleaned
+    
+    def get_mapping_statistics(self, supplier_name: str) -> Dict:
+        """
+        Получение статистики маппинга для поставщика
+        
+        Args:
+            supplier_name: Имя поставщика
+            
+        Returns:
+            Словарь со статистикой
+        """
+        mapping = self.config.get_supplier_mapping(supplier_name)
+        history = self.config.get_mapping_history(supplier_name)
+        
+        stats = {
+            'has_mapping': mapping is not None and any(mapping.values()),
+            'mapped_fields_count': sum(1 for v in mapping.values() if v) if mapping else 0,
+            'total_possible_fields': len(self.config.column_mapping),
+            'history_count': len(history),
+            'last_updated': history[0].get('created_at', '') if history else None,
+            'required_fields_mapped': False
+        }
+        
+        if mapping:
+            required = ['sku', 'price']
+            stats['required_fields_mapped'] = all(mapping.get(f) for f in required)
+        
+        return stats
 
 
 # ===================================================================
