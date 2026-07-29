@@ -9211,7 +9211,7 @@ def render_main_content() -> None:
 
 
 # ===================================================================
-# БЛОК 18: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+# БЛОК 18: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННАЯ)
 # ===================================================================
 
 def main() -> None:
@@ -9247,6 +9247,249 @@ def main() -> None:
         if st.button("🔄 Перезапустить приложение"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
+            st.rerun()
+
+
+def render_main_content() -> None:
+    """Основное содержимое страницы (ИСПРАВЛЕННОЕ)"""
+    st.markdown("""
+        <style>
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: linear-gradient(90deg, #1f77b4, #2ca02c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+        .stButton > button {
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="main-header">🤖 Робот для загрузки и анализа прайсов v11.0</div>', 
+               unsafe_allow_html=True)
+    
+    # Результат последнего запуска
+    if st.session_state.result:
+        result = st.session_state.result
+        
+        status_emoji = {
+            'success': '✅',
+            'no_files': 'ℹ️',
+            'partial_success': '⚠️',
+            'failed': '❌',
+            'critical_failed': '💥'
+        }
+        
+        emoji = status_emoji.get(result['status'], '❓')
+        
+        if result['status'] == 'success':
+            st.success(f"{emoji} Робот успешно выполнил задачу!")
+        elif result['status'] == 'no_files':
+            st.info(f"{emoji} Новых файлов не найдено")
+        elif result['status'] == 'partial_success':
+            st.warning(f"{emoji} Робот выполнен с предупреждениями")
+        else:
+            st.error(f"{emoji} Робот выполнен с ошибками")
+        
+        # Детальные метрики
+        cols = st.columns(8)
+        metrics = [
+            ("📁 Файлов", result.get('files_processed', 0)),
+            ("⏭️ Пропущено", result.get('files_skipped', 0)),
+            ("❌ С ошибками", result.get('files_with_errors', 0)),
+            ("🔄 Обновлено", result.get('products_updated', 0)),
+            ("➕ Добавлено", result.get('products_added', 0)),
+            ("📦 Отправлено", result.get('offers_sent', 0)),
+            ("⏱️ Время", f"{result.get('duration', 0):.1f}с"),
+            ("❌ Ошибок", len(result.get('errors', [])))
+        ]
+        
+        for col, (label, value) in zip(cols, metrics):
+            with col:
+                st.metric(label, value)
+        
+        # Ошибки
+        if result.get('errors'):
+            with st.expander(f"❌ Ошибки ({len(result['errors'])})", expanded=len(result['errors']) > 0):
+                for error in result['errors']:
+                    st.error(f"• {error}")
+        
+        # Предупреждения
+        if result.get('warnings'):
+            with st.expander(f"⚠️ Предупреждения ({len(result['warnings'])})"):
+                for warning in result['warnings']:
+                    st.warning(f"• {warning}")
+    
+    # Основные вкладки
+    main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
+        "📊 Панель управления",
+        "📊 Аналитика прайсов",
+        "🛠️ Маппинг",  # <-- Теперь здесь будет конструктор маппинга с локальной загрузкой
+        "📦 База товаров",
+        "📝 Логи"
+    ])
+    
+    with main_tab1:
+        render_dashboard()
+    
+    with main_tab2:
+        analysis_subtab1, analysis_subtab2 = st.tabs(["📊 Анализ цен", "⚙️ Поставщики"])
+        
+        with analysis_subtab1:
+            render_analysis_tab()
+        
+        with analysis_subtab2:
+            render_supplier_settings()
+    
+    with main_tab3:
+        # ВЫЗЫВАЕМ КОНСТРУКТОР МАППИНГА С ЛОКАЛЬНОЙ ЗАГРУЗКОЙ
+        render_mapping_constructor()  # <--- ИСПРАВЛЕНИЕ
+    
+    with main_tab4:
+        render_products_tab()
+    
+    with main_tab5:
+        render_logs_tab()
+
+
+def render_products_tab() -> None:
+    """Вкладка базы товаров"""
+    st.subheader("📦 База товаров (Google Sheets)")
+    
+    if st.session_state.product_db is None:
+        st.error("❌ Не удалось подключиться к Google Sheets")
+    else:
+        df = st.session_state.product_db.get_all_products()
+        
+        if df.empty:
+            st.warning("База товаров пуста")
+        else:
+            # Статистика
+            stats = st.session_state.product_db.get_stats()
+            
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                st.metric("📦 Всего", stats['total_products'])
+            with col2:
+                st.metric("🏷️ Брендов", stats['total_brands'])
+            with col3:
+                st.metric("💰 Средняя цена", f"{stats['avg_price']:.0f} ₽")
+            with col4:
+                st.metric("📦 В наличии", stats['products_with_stock'])
+            with col5:
+                st.metric("💵 Общая стоимость", f"{stats['total_value']:,.0f} ₽")
+            
+            # Ссылка на Google Sheets
+            if st.session_state.config.google_sheet_id:
+                st.markdown(
+                    f"🔗 [Открыть Google Sheets](https://docs.google.com/spreadsheets/d/"
+                    f"{st.session_state.config.google_sheet_id})"
+                )
+            
+            # Поиск
+            search_query = st.text_input("🔍 Поиск по базе", 
+                                       placeholder="Введите артикул, бренд или название...")
+            
+            if search_query:
+                df = st.session_state.product_db.search_products(search_query)
+                st.write(f"Найдено: {len(df)} товаров")
+            
+            # Таблица товаров
+            st.dataframe(
+                df,
+                use_container_width=True,
+                column_config={
+                    "артикул": "Артикул",
+                    "бренд": "Бренд",
+                    "название": "Название",
+                    "цена_розница": st.column_config.NumberColumn("Цена", format="%.2f ₽"),
+                    "остаток": "Остаток",
+                    "категория": "Категория"
+                },
+                height=500,
+                hide_index=True
+            )
+            
+            # Экспорт
+            if st.button("📥 Экспортировать базу в Excel"):
+                filepath = st.session_state.product_db.export_to_excel()
+                with open(filepath, 'rb') as f:
+                    st.download_button(
+                        "📥 Скачать Excel",
+                        f.read(),
+                        os.path.basename(filepath),
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+
+
+def render_logs_tab() -> None:
+    """Вкладка логов"""
+    st.subheader("📝 Логи выполнения")
+    
+    # Фильтры логов
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        log_level_filter = st.selectbox(
+            "Уровень",
+            ['ALL', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'SUCCESS', 'DEBUG'],
+            key="log_level_filter"
+        )
+    
+    with col2:
+        log_count = st.number_input("Количество", value=100, step=50, key="log_count")
+    
+    with col3:
+        log_search = st.text_input("Поиск в логах", key="log_search")
+    
+    # Отображение логов
+    log_container = st.container(height=500)
+    
+    with log_container:
+        logs = st.session_state.logger.get_logs(log_count)
+        
+        if log_level_filter != 'ALL':
+            logs = [log for log in logs if log['level'] == log_level_filter]
+        
+        if log_search:
+            logs = [log for log in logs if log_search.lower() in log['message'].lower()]
+        
+        for log in logs:
+            level = log['level']
+            message = log['message']
+            timestamp = log['timestamp'][:19]
+            
+            if level in ['ERROR', 'CRITICAL']:
+                st.error(f"[{timestamp}] {message}")
+            elif level == 'WARNING':
+                st.warning(f"[{timestamp}] {message}")
+            elif level == 'SUCCESS':
+                st.success(f"[{timestamp}] {message}")
+            elif level == 'DEBUG':
+                st.caption(f"[{timestamp}] {message}")
+            else:
+                st.info(f"[{timestamp}] {message}")
+    
+    # Экспорт логов
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📥 Экспорт логов (JSON)", use_container_width=True):
+            filepath = st.session_state.logger.export_logs('json')
+            with open(filepath, 'rb') as f:
+                st.download_button(
+                    "📥 Скачать JSON",
+                    f.read(),
+                    os.path.basename(filepath),
+                    "application/json"
+                )
+    
+    with col2:
+        if st.button("🔄 Обновить логи", use_container_width=True):
             st.rerun()
 
 
