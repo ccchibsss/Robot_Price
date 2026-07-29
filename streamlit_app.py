@@ -5749,22 +5749,22 @@ def render_gs_instructions() -> None:
         Из ссылки возьмите ID:
         Скопируйте этот ID и вставьте в поле выше.
 
-#### Шаг 4: Проверьте
-1. Вставьте ID в поле выше
-2. Нажмите **"Проверить подключение"**
-3. Если все зеленое - вы готовы к работе!
+        #### Шаг 4: Проверьте
+        1. Вставьте ID в поле выше
+        2. Нажмите **"Проверить подключение"**
+        3. Если все зеленое - вы готовы к работе!
 
-### 💡 Советы
-- Названия колонок в таблице могут быть любыми (робот сам поймет)
-- Обязательные колонки: **Артикул** и **Цена базовая**
-- Рекомендуемые колонки: **Остаток**, **Бренд**, **Название**
-- При первом запуске робот создаст необходимые колонки автоматически
+        ### 💡 Советы
+        - Названия колонок в таблице могут быть любыми (робот сам поймет)
+        - Обязательные колонки: **Артикул** и **Цена базовая**
+        - Рекомендуемые колонки: **Остаток**, **Бренд**, **Название**
+        - При первом запуске робот создаст необходимые колонки автоматически
 
-### ⚠️ Важно
-- Если вы используете **публичный доступ**, никаких ключей не нужно!
-- Это самый простой способ подключения
-- Все изменения сохраняются в реальном времени
-""")
+        ### ⚠️ Важно
+        - Если вы используете **публичный доступ**, никаких ключей не нужно!
+        - Это самый простой способ подключения
+        - Все изменения сохраняются в реальном времени
+        """)
 
 
 def render_gs_setup_ui() -> None:
@@ -5942,1754 +5942,1751 @@ def render_gs_setup_ui() -> None:
     except Exception as e:
         st.error(f"❌ Ошибка получения статуса: {e}")
 
-# ===================================================================
-# БЛОК 15: ИНТЕРФЕЙС STREAMLIT - ОБУЧЕНИЕ ПРАЙСА
-# ===================================================================
-
-def render_price_learning_ui() -> None:
-"""
-Полноценный интерфейс для загрузки прайса и обучения системы.
-Пользователь загружает файл, система показывает структуру,
-пользователь указывает соответствие колонок, система запоминает.
-"""
-st.subheader("🎓 ОБУЧЕНИЕ СИСТЕМЫ – ЗАГРУЗКА И НАСТРОЙКА ПРАЙСА")
-st.markdown("""
-**📥 ЗАГРУЗИТЕ ПРАЙС И НАСТРОЙТЕ КОЛОНКИ ОДИН РАЗ**
-
-Система запомнит ваши настройки и будет автоматически применять их 
-при загрузке следующих прайсов от этого поставщика.
-
-**Поддерживаемые форматы:** XLSX, XLS, CSV, XML, JSON, TXT, ODS, XLSM, XLSB
-**Максимальный размер:** 100 MB
-""")
-
-# Проверка наличия поставщиков
-suppliers = st.session_state.config.suppliers
-supplier_names = [s.get('name', 'Unknown') for s in suppliers]
-
-if not supplier_names:
-st.warning("⚠️ У вас нет поставщиков. Сначала создайте поставщика в разделе 'Поставщики'.")
-
-with st.expander("➕ БЫСТРОЕ СОЗДАНИЕ ПОСТАВЩИКА", expanded=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        new_name = st.text_input("Название поставщика*", key="learning_supplier_name")
-        new_email = st.text_input("Email*", key="learning_supplier_email")
-        new_password = st.text_input("Пароль*", type="password", key="learning_supplier_password")
-    
-    with col2:
-        new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key="learning_supplier_imap")
-        new_port = st.number_input("IMAP порт", value=993, step=1, key="learning_supplier_port")
-        new_enabled = st.checkbox("Активен", value=True, key="learning_supplier_enabled")
-    
-    if st.button("✅ Создать поставщика", type="primary", use_container_width=True, key="learning_create_supplier_btn"):
-        if not new_name or not new_email or not new_password:
-            st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
-        else:
-            new_supplier = SupplierConfig(
-                name=new_name,
-                email=new_email,
-                email_password=new_password,
-                imap_server=new_imap,
-                imap_port=new_port,
-                enabled=new_enabled
-            )
-            st.session_state.config.suppliers.append(new_supplier.to_dict())
-            st.session_state.config._save_suppliers()
-            st.success(f"✅ Поставщик '{new_name}' создан!")
-            st.balloons()
-            time.sleep(1)
-            st.rerun()
-
-st.info("💡 После создания поставщика обновите страницу и загрузите прайс для обучения.")
-return
-
-# Основной интерфейс обучения
-st.divider()
-
-col1, col2 = st.columns([2, 1])
-with col1:
-selected_supplier = st.selectbox(
-    "👤 Выберите поставщика для обучения",
-    supplier_names,
-    key="learning_supplier_select"
-)
-
-with col2:
-supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
-has_mapping = supplier_config and any(supplier_config.column_mapping.values())
-
-if has_mapping:
-    st.success("✅ Маппинг уже настроен")
-    if st.button("🔄 Обновить маппинг", use_container_width=True, key="learning_update_mapping_btn"):
-        st.session_state.learning_force_update = True
-else:
-    st.warning("⚠️ Маппинг не настроен")
-
-st.divider()
-
-# Состояние загрузки файла
-if 'learning_file_loaded' not in st.session_state:
-st.session_state.learning_file_loaded = False
-st.session_state.learning_file_content = None
-st.session_state.learning_file_filename = None
-st.session_state.learning_df = None
-st.session_state.learning_columns = None
-st.session_state.learning_metadata = None
-st.session_state.learning_force_update = False
-
-# Загрузка файла
-uploaded_file = st.file_uploader(
-"📤 ЗАГРУЗИТЕ ФАЙЛ ПРАЙСА ДЛЯ ОБУЧЕНИЯ",
-type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
-help="Выберите файл прайса от поставщика для настройки соответствия колонок",
-key="learning_file_uploader"
-)
-
-if uploaded_file is not None:
-try:
-    file_content = uploaded_file.read()
-    file_filename = uploaded_file.name
-    
-    # Проверка размера
-    if len(file_content) > 100 * 1024 * 1024:
-        st.error(f"❌ Файл слишком большой ({len(file_content) / 1024 / 1024:.1f} MB). Максимальный размер 100 MB.")
-        st.stop()
-    
-    # Сохранение файла
-    parser = PriceParser(st.session_state.config, st.session_state.logger)
-    
-    with st.spinner("🔍 Анализ файла..."):
-        df = parser.parse(file_filename, file_content)
-        
-        if df.empty:
-            st.error("❌ Файл пуст или не содержит данных")
-            st.stop()
-        
-        # Получение метаданных
-        file_info = parser.get_file_info(file_content, file_filename)
-        metadata = {
-            'file_info': file_info,
-            'row_count': len(df),
-            'column_count': len(df.columns),
-            'columns': df.columns.tolist(),
-            'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},
-            'encoding': file_info.get('encoding', 'unknown'),
-            'file_size_formatted': f"{file_info.get('size', 0) / 1024:.1f} KB"
-        }
-        
-        # Сохранение в сессию
-        st.session_state.learning_file_loaded = True
-        st.session_state.learning_file_content = file_content
-        st.session_state.learning_file_filename = file_filename
-        st.session_state.learning_df = df
-        st.session_state.learning_columns = df.columns.tolist()
-        st.session_state.learning_metadata = metadata
-        
-        st.success(f"✅ Файл успешно загружен: {file_filename}")
-        st.balloons()
-        
-except Exception as e:
-    st.error(f"❌ Ошибка загрузки файла: {str(e)}")
-    st.exception(e)
-    st.session_state.learning_file_loaded = False
-
-# Если файл загружен – показываем интерфейс настройки
-if st.session_state.learning_file_loaded and st.session_state.learning_df is not None:
-df = st.session_state.learning_df
-columns = st.session_state.learning_columns
-metadata = st.session_state.learning_metadata
-file_filename = st.session_state.learning_file_filename
-
-st.divider()
-st.subheader("📊 ИНФОРМАЦИЯ О ФАЙЛЕ")
-
-col1, col2, col3, col4, col5 = st.columns(5)
-with col1:
-    st.metric("📄 Строк", metadata.get('row_count', 0))
-with col2:
-    st.metric("📊 Колонок", metadata.get('column_count', 0))
-with col3:
-    st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
-with col4:
-    st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
-with col5:
-    st.metric("📁 Формат", metadata.get('file_info', {}).get('format', 'unknown'))
-
-st.divider()
-
-# Предпросмотр данных
-st.subheader("📋 ПРЕДПРОСМОТР ДАННЫХ")
-
-preview_rows = st.slider(
-    "Количество строк для предпросмотра",
-    min_value=5,
-    max_value=100,
-    value=20,
-    step=5,
-    key="learning_preview_rows"
-)
-
-st.dataframe(
-    df.head(preview_rows),
-    use_container_width=True,
-    height=400
-)
-
-# Статистика по колонкам
-with st.expander("📊 СТАТИСТИКА ПО КОЛОНКАМ", expanded=False):
-    col_stats = []
-    for col in df.columns:
-        col_data = df[col]
-        col_stats.append({
-            'Колонка': col,
-            'Тип': str(col_data.dtype),
-            'Непустых': len(df) - col_data.isna().sum(),
-            'Пустых': col_data.isna().sum(),
-            'Уникальных': col_data.nunique(),
-            'Примеры': ', '.join([str(x) for x in col_data.dropna().head(3).tolist()])
-        })
-    st.dataframe(
-        pd.DataFrame(col_stats),
-        use_container_width=True,
-        hide_index=True
-    )
-
-st.divider()
 
 # ===================================================================
-# ИНТЕРФЕЙС НАСТРОЙКИ КОЛОНОК
-# ===================================================================
-
-st.subheader("🎯 НАСТРОЙКА СООТВЕТСТВИЯ КОЛОНОК")
-st.markdown("""
-**Укажите, какая колонка в загруженном файле соответствует каждому полю.**
-
-**Обязательные поля** (отмечены *):
-- **Артикул (SKU)** – уникальный идентификатор товара
-- **Цена** – цена товара
-
-**Рекомендуемые поля:**
-- Остаток, Бренд, Название, Категория
-""")
-
-# Получаем текущий маппинг поставщика
-supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
-current_mapping = supplier_config.column_mapping if supplier_config else {}
-
-# Поля для настройки с подсказками
-field_definitions = {
-    'sku': {'label': '📌 Артикул (SKU) *', 'help': 'Уникальный идентификатор товара', 'required': True},
-    'price': {'label': '💰 Цена *', 'help': 'Цена товара', 'required': True},
-    'stock': {'label': '📦 Остаток', 'help': 'Количество товара на складе', 'required': False},
-    'brand': {'label': '🏷️ Бренд', 'help': 'Производитель или бренд товара', 'required': False},
-    'name': {'label': '📝 Название', 'help': 'Наименование товара', 'required': False},
-    'category': {'label': '📂 Категория', 'help': 'Категория или раздел товара', 'required': False},
-    'description': {'label': '📄 Описание', 'help': 'Описание товара', 'required': False},
-    'weight': {'label': '⚖️ Вес', 'help': 'Вес товара', 'required': False},
-    'barcode': {'label': '🔢 Штрихкод', 'help': 'Штрихкод или EAN товара', 'required': False},
-    'country': {'label': '🌍 Страна', 'help': 'Страна производства', 'required': False},
-    'warranty': {'label': '🛡️ Гарантия', 'help': 'Срок гарантии', 'required': False},
-    'dimensions': {'label': '📐 Размеры', 'help': 'Габариты товара', 'required': False},
-    'currency': {'label': '💱 Валюта', 'help': 'Валюта цены', 'required': False},
-    'vat': {'label': '🧾 НДС', 'help': 'Ставка НДС', 'required': False}
-}
-
-# Создаем список опций для выбора (пустое значение + все колонки)
-col_options = [''] + columns
-
-# Функция для определения индекса по умолчанию
-def get_default_index(field_name: str) -> int:
-    # Проверяем сохранённый маппинг
-    if current_mapping and field_name in current_mapping:
-        col_name = current_mapping[field_name]
-        if col_name in col_options:
-            return col_options.index(col_name)
-    
-    # Автоопределение по названию колонки
-    for idx, col in enumerate(col_options):
-        if col:
-            col_lower = col.lower()
-            field_lower = field_name.lower()
-            # Проверяем частичное совпадение
-            if field_lower in col_lower or col_lower in field_lower:
-                return idx
-            # Проверяем синонимы
-            synonyms = {
-                'sku': ['артикул', 'код', 'id', 'номер', 'article', 'art'],
-                'price': ['цена', 'cost', 'прайс', 'стоимость'],
-                'stock': ['остаток', 'количество', 'кол-во', 'наличие', 'quantity'],
-                'brand': ['бренд', 'производитель', 'manufacturer', 'vendor'],
-                'name': ['название', 'наименование', 'product', 'title'],
-                'category': ['категория', 'раздел', 'группа', 'section'],
-                'description': ['описание', 'desc', 'характеристики'],
-                'weight': ['вес', 'масса', 'weight', 'mass'],
-                'barcode': ['штрихкод', 'ean', 'upc', 'баркод'],
-                'country': ['страна', 'производство', 'origin', 'country'],
-                'warranty': ['гарантия', 'guarantee', 'warranty'],
-                'dimensions': ['размеры', 'габариты', 'dimensions', 'size'],
-                'currency': ['валюта', 'currency', 'valuta'],
-                'vat': ['ндс', 'vat', 'ставка']
-            }
-            if field_name in synonyms:
-                for syn in synonyms[field_name]:
-                    if syn in col_lower:
-                        return idx
-    return 0
-
-# Отображаем поля в две колонки
-col1, col2 = st.columns(2)
-
-mapping = {}
-field_errors = []
-
-# Группируем поля для отображения
-field_items = list(field_definitions.items())
-
-for i, (field_name, field_info) in enumerate(field_items):
-    with col1 if i % 2 == 0 else col2:
-        default_idx = get_default_index(field_name)
-        
-        # Добавляем звёздочку для обязательных полей
-        label = field_info['label']
-        if field_info['required']:
-            label = f"**{label}**"
-        
-        selected_col = st.selectbox(
-            label,
-            options=col_options,
-            index=default_idx,
-            help=field_info['help'],
-            key=f"learning_{field_name}_{selected_supplier}"
-        )
-        
-        if selected_col:
-            mapping[field_name] = selected_col
-        else:
-            mapping[field_name] = ''
-        
-        # Проверка обязательных полей
-        if field_info['required'] and not selected_col:
-            field_errors.append(f"Поле '{field_info['label']}' обязательно для заполнения")
-
-st.divider()
-
-# ===================================================================
-# ПРЕДПРОСМОТР РЕЗУЛЬТАТА
-# ===================================================================
-
-st.subheader("🔍 ПРЕДПРОСМОТР РЕЗУЛЬТАТА МАППИНГА")
-
-if not mapping.get('sku') or not mapping.get('price'):
-    st.warning("⚠️ **Обязательные поля не заполнены!**")
-    st.warning("Заполните Артикул (SKU) и Цену для продолжения.")
-else:
-    # Применяем маппинг
-    parser = PriceParser(st.session_state.config, st.session_state.logger)
-    try:
-        result_df = parser._apply_mapping(df.copy(), mapping)
-        
-        if not result_df.empty:
-            # Показываем статистику
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("📦 Всего товаров", len(result_df))
-            with col2:
-                valid_prices = (result_df['price'] > 0).sum() if 'price' in result_df.columns else 0
-                st.metric("💰 С ценой", valid_prices)
-            with col3:
-                with_stock = (result_df['stock'] > 0).sum() if 'stock' in result_df.columns else 0
-                st.metric("📦 В наличии", with_stock)
-            with col4:
-                unique_skus = result_df['sku'].nunique() if 'sku' in result_df.columns else 0
-                st.metric("🔑 Уникальных SKU", unique_skus)
-            
-            # Показываем таблицу с результатом
-            st.dataframe(
-                result_df.head(20),
-                use_container_width=True,
-                height=300,
-                column_config={
-                    "sku": "Артикул",
-                    "price": st.column_config.NumberColumn("Цена", format="%.2f"),
-                    "stock": "Остаток",
-                    "brand": "Бренд",
-                    "name": "Название",
-                    "category": "Категория",
-                    "description": "Описание"
-                }
-            )
-            
-            # Валидация результата
-            validation = parser.validate_data(result_df)
-            
-            if not validation.is_valid:
-                st.warning("⚠️ **Обнаружены проблемы с данными:**")
-                for error in validation.errors[:5]:
-                    st.error(f"• {error}")
-                for warning in validation.warnings[:5]:
-                    st.warning(f"• {warning}")
-            else:
-                if validation.statistics:
-                    st.success("✅ Данные прошли валидацию!")
-                    
-                    # Дополнительная статистика
-                    if 'price_range' in validation.statistics:
-                        price_range = validation.statistics['price_range']
-                        st.info(f"💰 Диапазон цен: от {price_range['min']:.2f} до {price_range['max']:.2f}, средняя: {price_range['mean']:.2f}")
-                    
-                    if 'stock_stats' in validation.statistics:
-                        stock_stats = validation.statistics['stock_stats']
-                        st.info(f"📦 Общий остаток: {stock_stats['total']}, товаров в наличии: {stock_stats['with_stock']}")
-        else:
-            st.error("❌ После применения маппинга не осталось данных")
-            
-    except Exception as e:
-        st.error(f"❌ Ошибка применения маппинга: {str(e)}")
-
-st.divider()
-
-# ===================================================================
-# СОХРАНЕНИЕ МАППИНГА
-# ===================================================================
-
-st.subheader("💾 СОХРАНЕНИЕ НАСТРОЕК")
-
-col1, col2, col3 = st.columns([2, 1, 1])
-
-with col1:
-    save_comment = st.text_input(
-        "📝 Комментарий к сохранению",
-        placeholder="Например: Настройка для нового прайса от 01.01.2024",
-        key="learning_save_comment"
-    )
-
-with col2:
-    if st.button("💾 СОХРАНИТЬ МАППИНГ", type="primary", use_container_width=True, key="learning_save_mapping_btn"):
-        if not mapping.get('sku') or not mapping.get('price'):
-            st.error("❌ Нельзя сохранить маппинг без заполнения обязательных полей (SKU и Цена)")
-        else:
-            # Создаем или обновляем поставщика
-            supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
-            if supplier_config:
-                supplier_config.column_mapping = {k: v for k, v in mapping.items() if v}
-                # Обновляем в списке поставщиков
-                for i, s in enumerate(st.session_state.config.suppliers):
-                    if s.get('name') == selected_supplier:
-                        st.session_state.config.suppliers[i] = supplier_config.to_dict()
-                        break
-                st.session_state.config._save_suppliers()
-                
-                st.success(f"✅ Маппинг успешно сохранён для поставщика **{selected_supplier}**!")
-                st.balloons()
-                
-                # Показываем сохранённый маппинг
-                saved_mapping = supplier_config.column_mapping
-                if saved_mapping:
-                    st.info("📋 **Сохранённые настройки:**")
-                    mapping_df = pd.DataFrame([
-                        {'Поле': field, 'Колонка в файле': col}
-                        for field, col in saved_mapping.items()
-                    ])
-                    st.dataframe(mapping_df, use_container_width=True, hide_index=True)
-                
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("❌ Поставщик не найден")
-
-with col3:
-    if has_mapping:
-        if st.button("🔄 СБРОСИТЬ МАППИНГ", use_container_width=True, key="learning_reset_mapping_btn"):
-            if st.session_state.get("learning_confirm_reset", False):
-                supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
-                if supplier_config:
-                    supplier_config.column_mapping = {}
-                    for i, s in enumerate(st.session_state.config.suppliers):
-                        if s.get('name') == selected_supplier:
-                            st.session_state.config.suppliers[i] = supplier_config.to_dict()
-                            break
-                    st.session_state.config._save_suppliers()
-                    st.success("✅ Маппинг сброшен")
-                    st.session_state.learning_confirm_reset = False
-                    time.sleep(1)
-                    st.rerun()
-            else:
-                st.session_state.learning_confirm_reset = True
-                st.warning("⚠️ Нажмите ещё раз для подтверждения сброса")
-
-st.divider()
-
-# ===================================================================
-# ТЕСТИРОВАНИЕ ЗАГРУЗКИ
-# ===================================================================
-
-st.subheader("🧪 ТЕСТИРОВАНИЕ ЗАГРУЗКИ С НАСТРОЕННЫМ МАППИНГОМ")
-st.markdown("""
-После сохранения маппинга вы можете протестировать, как система будет обрабатывать 
-новые прайсы от этого поставщика.
-""")
-
-test_col1, test_col2 = st.columns(2)
-
-with test_col1:
-    # Создаем тестовый файл для проверки
-    if st.button("📤 ЗАГРУЗИТЬ ТЕСТОВЫЙ ФАЙЛ", use_container_width=True, key="learning_test_load_btn"):
-        supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
-        if supplier_config and any(supplier_config.column_mapping.values()):
-            # Используем текущий загруженный файл как тестовый
-            test_content = st.session_state.learning_file_content
-            test_filename = st.session_state.learning_file_filename
-            
-            if test_content:
-                with st.spinner("🔄 Тестирование загрузки..."):
-                    parser = PriceParser(st.session_state.config, st.session_state.logger)
-                    test_df = parser.parse(
-                        test_filename,
-                        test_content,
-                        supplier_config.column_mapping,
-                        supplier_config.processing_rules
-                    )
-                    
-                    if not test_df.empty:
-                        st.success(f"✅ Тест успешен! Загружено {len(test_df)} товаров")
-                        
-                        # Показываем результат
-                        st.dataframe(
-                            test_df.head(10),
-                            use_container_width=True,
-                            height=200
-                        )
-                        
-                        # Статистика
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("📦 Товаров", len(test_df))
-                        with col2:
-                            valid_prices = (test_df['price'] > 0).sum()
-                            st.metric("💰 С ценой", valid_prices)
-                        with col3:
-                            with_stock = (test_df['stock'] > 0).sum()
-                            st.metric("📦 В наличии", with_stock)
-                    else:
-                        st.error("❌ Тест не удался: файл не содержит данных")
-            else:
-                st.warning("⚠️ Нет загруженного файла для тестирования")
-        else:
-            st.warning("⚠️ Сначала сохраните маппинг для этого поставщика")
-
-with test_col2:
-    # Опция загрузить другой файл для теста
-    st.markdown("**Или загрузите другой файл для теста:**")
-    test_file = st.file_uploader(
-        "Выберите файл для тестирования",
-        type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt'],
-        key="learning_test_file_uploader"
-    )
-    
-    if test_file is not None:
-        try:
-            test_content = test_file.read()
-            test_filename = test_file.name
-            
-            supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
-            if supplier_config and any(supplier_config.column_mapping.values()):
-                with st.spinner("🔄 Тестирование загрузки..."):
-                    parser = PriceParser(st.session_state.config, st.session_state.logger)
-                    test_df = parser.parse(
-                        test_filename,
-                        test_content,
-                        supplier_config.column_mapping,
-                        supplier_config.processing_rules
-                    )
-                    
-                    if not test_df.empty:
-                        st.success(f"✅ Тест успешен! Загружено {len(test_df)} товаров")
-                        st.dataframe(test_df.head(10), use_container_width=True, height=200)
-                    else:
-                        st.error("❌ Тест не удался: файл пуст")
-            else:
-                st.warning("⚠️ Сначала сохраните маппинг для этого поставщика")
-        except Exception as e:
-            st.error(f"❌ Ошибка тестирования: {str(e)}")
-
-st.divider()
-
-# ===================================================================
-# ИСТОРИЯ И СТАТИСТИКА
-# ===================================================================
-
-with st.expander("📜 ИСТОРИЯ И СТАТИСТИКА ОБУЧЕНИЯ", expanded=False):
-    supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
-    
-    if supplier_config:
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("📋 Настроено полей", len(supplier_config.column_mapping))
-        
-        with col2:
-            total_possible = len(field_definitions)
-            st.metric("📊 Всего полей", total_possible)
-        
-        with col3:
-            completion = (len(supplier_config.column_mapping) / total_possible * 100) if total_possible > 0 else 0
-            st.metric("🎯 Заполнено", f"{completion:.1f}%")
-        
-        # Показываем сохранённый маппинг
-        if supplier_config.column_mapping:
-            st.markdown("**📋 Текущий маппинг:**")
-            mapping_data = []
-            for field, col in supplier_config.column_mapping.items():
-                if col:
-                    field_info = field_definitions.get(field, {})
-                    mapping_data.append({
-                        'Поле': field_info.get('label', field),
-                        'Колонка': col,
-                        'Обязательное': '✅' if field_info.get('required', False) else '❌'
-                    })
-            st.dataframe(pd.DataFrame(mapping_data), use_container_width=True, hide_index=True)
-        else:
-            st.info("Маппинг не настроен")
-        
-        # Статистика использования
-        stats = supplier_config.stats
-        if stats:
-            st.markdown("**📊 Статистика использования:**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("📁 Обработано файлов", stats.get('total_files_processed', 0))
-            with col2:
-                st.metric("📦 Загружено товаров", stats.get('total_products_loaded', 0))
-            with col3:
-                success_rate = stats.get('success_rate', 0)
-                st.metric("✅ Успешность", f"{success_rate:.1f}%")
-
-else:
-# Если файл не загружен – показываем инструкцию
-st.info("📤 **Загрузите файл прайса для начала обучения**")
-st.markdown("""
-### 📋 ИНСТРУКЦИЯ ПО ОБУЧЕНИЮ:
-
-1. **Загрузите файл** прайса от поставщика
-2. **Проанализируйте структуру** – система покажет колонки и данные
-3. **Настройте соответствие** – выберите, какая колонка к чему относится
-4. **Проверьте результат** – система покажет, как будет выглядеть обработанный прайс
-5. **Сохраните настройки** – система запомнит их для этого поставщика
-
-**После сохранения** все следующие прайсы от этого поставщика будут обрабатываться автоматически!
-""")
-
-# Показываем пример
-with st.expander("ℹ️ ПРИМЕР НАСТРОЙКИ", expanded=False):
-    st.markdown("""
-    ### Пример соответствия колонок:
-    
-    | Поле | Колонка в файле |
-    |------|-----------------|
-    | Артикул (SKU) | `Артикул` или `Код товара` |
-    | Цена | `Цена розничная` или `Price` |
-    | Остаток | `Остаток` или `Кол-во` |
-    | Бренд | `Бренд` или `Производитель` |
-    | Название | `Название` или `Наименование` |
-    | Категория | `Категория` или `Раздел` |
-    
-    **Совет:** Если колонка не подходит – оставьте поле пустым.
-    """)
-
-st.divider()
-
-# Кнопка для очистки сессии
-if st.session_state.learning_file_loaded:
-if st.button("🗑️ ОЧИСТИТЬ ЗАГРУЖЕННЫЙ ФАЙЛ", use_container_width=True, key="learning_clear_file_btn"):
-    st.session_state.learning_file_loaded = False
-    st.session_state.learning_file_content = None
-    st.session_state.learning_file_filename = None
-    st.session_state.learning_df = None
-    st.session_state.learning_columns = None
-    st.session_state.learning_metadata = None
-    st.rerun()
-
-
-# ===================================================================
-# БЛОК 16: ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ИНТЕРФЕЙСА
+# БЛОК 15: ИНТЕРФЕЙС STREAMLIT - ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ===================================================================
 
 def init_session_state() -> None:
-"""Расширенная инициализация состояния сессии"""
-if 'logger' not in st.session_state:
-st.session_state.logger = StreamlitLogger()
-
-if 'config' not in st.session_state:
-st.session_state.config = Config.load()
-
-if 'product_db' not in st.session_state:
-try:
-    config = st.session_state.config
-    if config.google_sheet_id and config.use_public_access:
-        st.session_state.product_db = GoogleSheetsDatabase(config, st.session_state.logger)
-    else:
-        if os.path.exists(config.google_credentials_json):
-            st.session_state.product_db = GoogleSheetsDatabase(config, st.session_state.logger)
-        else:
+    """Расширенная инициализация состояния сессии"""
+    if 'logger' not in st.session_state:
+        st.session_state.logger = StreamlitLogger()
+    
+    if 'config' not in st.session_state:
+        st.session_state.config = Config.load()
+    
+    if 'product_db' not in st.session_state:
+        try:
+            config = st.session_state.config
+            if config.google_sheet_id and config.use_public_access:
+                st.session_state.product_db = GoogleSheetsDatabase(config, st.session_state.logger)
+            else:
+                if os.path.exists(config.google_credentials_json):
+                    st.session_state.product_db = GoogleSheetsDatabase(config, st.session_state.logger)
+                else:
+                    st.session_state.product_db = None
+                    st.info("📊 Для работы с Google Sheets настройте подключение во вкладке 'Google Sheets'")
+        except Exception as e:
             st.session_state.product_db = None
-            st.info("📊 Для работы с Google Sheets настройте подключение во вкладке 'Google Sheets'")
-except Exception as e:
-    st.session_state.product_db = None
-    st.warning(f"⚠️ Не удалось подключиться к Google Sheets: {str(e)}")
-    st.info("💡 Перейдите во вкладку 'Google Sheets' для настройки")
-
-if 'analysis_result' not in st.session_state:
-st.session_state.analysis_result = None
-
-if 'analyzer' not in st.session_state:
-st.session_state.analyzer = None
-
-if 'is_running' not in st.session_state:
-st.session_state.is_running = False
-
-if 'result' not in st.session_state:
-st.session_state.result = None
-
-if 'progress_message' not in st.session_state:
-st.session_state.progress_message = ""
-
-if 'progress_value' not in st.session_state:
-st.session_state.progress_value = 0
-
-if 'robot' not in st.session_state:
-st.session_state.robot = None
-
-if 'db' not in st.session_state:
-st.session_state.db = Database(st.session_state.config.db_path)
-
-if 'notification_manager' not in st.session_state:
-st.session_state.notification_manager = NotificationManager(
-    st.session_state.config,
-    st.session_state.logger
-)
-
-if 'selected_supplier' not in st.session_state:
-st.session_state.selected_supplier = None
-
-if 'auto_refresh' not in st.session_state:
-st.session_state.auto_refresh = False
+            st.warning(f"⚠️ Не удалось подключиться к Google Sheets: {str(e)}")
+            st.info("💡 Перейдите во вкладку 'Google Sheets' для настройки")
+    
+    if 'analysis_result' not in st.session_state:
+        st.session_state.analysis_result = None
+    
+    if 'analyzer' not in st.session_state:
+        st.session_state.analyzer = None
+    
+    if 'is_running' not in st.session_state:
+        st.session_state.is_running = False
+    
+    if 'result' not in st.session_state:
+        st.session_state.result = None
+    
+    if 'progress_message' not in st.session_state:
+        st.session_state.progress_message = ""
+    
+    if 'progress_value' not in st.session_state:
+        st.session_state.progress_value = 0
+    
+    if 'robot' not in st.session_state:
+        st.session_state.robot = None
+    
+    if 'db' not in st.session_state:
+        st.session_state.db = Database(st.session_state.config.db_path)
+    
+    if 'notification_manager' not in st.session_state:
+        st.session_state.notification_manager = NotificationManager(
+            st.session_state.config,
+            st.session_state.logger
+        )
+    
+    if 'selected_supplier' not in st.session_state:
+        st.session_state.selected_supplier = None
+    
+    if 'auto_refresh' not in st.session_state:
+        st.session_state.auto_refresh = False
 
 
 def render_dashboard() -> None:
-"""Расширенная панель управления"""
-st.subheader("📊 Панель управления")
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-db_size = os.path.getsize(st.session_state.config.db_path) / (1024 * 1024)
-st.metric("💾 Размер БД", f"{db_size:.1f} MB")
-
-with col2:
-temp_size = sum(f.stat().st_size for f in Path(st.session_state.config.temp_dir).rglob('*') if f.is_file())
-st.metric("📁 Временные файлы", f"{temp_size / 1024 / 1024:.1f} MB")
-
-with col3:
-archive_count = len(list(Path(st.session_state.config.archive_dir).glob('*')))
-st.metric("📦 Файлов в архиве", archive_count)
-
-with col4:
-backup_count = len(list(Path(st.session_state.config.backup_dir).glob('*')))
-st.metric("💿 Резервных копий", backup_count)
-
-st.subheader("📈 Статистика запусков")
-
-db = st.session_state.db
-stats = db.get_stats(30)
-
-if not stats.empty:
-col1, col2, col3, col4, col5 = st.columns(5)
-
-with col1:
-    st.metric("🚀 Всего запусков", len(stats))
-with col2:
-    st.metric("📁 Обработано файлов", int(stats['files_processed'].sum()))
-with col3:
-    st.metric("📦 Отправлено товаров", int(stats['offers_sent'].sum()))
-with col4:
-    st.metric("❌ Всего ошибок", int(stats['errors'].sum()))
-with col5:
-    avg_time = stats['duration_seconds'].mean()
-    st.metric("⏱️ Среднее время", f"{avg_time:.1f}с")
-
-if len(stats) > 1:
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    """Расширенная панель управления"""
+    st.subheader("📊 Панель управления")
     
-    fig.add_trace(
-        go.Bar(x=stats['run_date'], y=stats['files_processed'], name="Файлы"),
-        secondary_y=False
-    )
+    col1, col2, col3, col4 = st.columns(4)
     
-    fig.add_trace(
-        go.Scatter(x=stats['run_date'], y=stats['offers_sent'], name="Товары", mode='lines+markers'),
-        secondary_y=True
-    )
+    with col1:
+        db_size = os.path.getsize(st.session_state.config.db_path) / (1024 * 1024)
+        st.metric("💾 Размер БД", f"{db_size:.1f} MB")
     
-    fig.update_layout(
-        title='Активность робота',
-        xaxis_title='Дата',
-        height=400
-    )
+    with col2:
+        temp_size = sum(f.stat().st_size for f in Path(st.session_state.config.temp_dir).rglob('*') if f.is_file())
+        st.metric("📁 Временные файлы", f"{temp_size / 1024 / 1024:.1f} MB")
     
-    st.plotly_chart(fig, use_container_width=True)
-
-alerts = db.get_unresolved_alerts()
-if not alerts.empty:
-st.subheader("⚠️ Системные предупреждения")
-for _, alert in alerts.head(5).iterrows():
-    severity_color = {
-        'critical': '🔴',
-        'error': '🟠',
-        'warning': '🟡',
-        'info': '🔵'
-    }.get(alert['severity'], '⚪')
+    with col3:
+        archive_count = len(list(Path(st.session_state.config.archive_dir).glob('*')))
+        st.metric("📦 Файлов в архиве", archive_count)
     
-    st.warning(f"{severity_color} **{alert['title']}** - {alert['created_at'][:19]}")
+    with col4:
+        backup_count = len(list(Path(st.session_state.config.backup_dir).glob('*')))
+        st.metric("💿 Резервных копий", backup_count)
+    
+    st.subheader("📈 Статистика запусков")
+    
+    db = st.session_state.db
+    stats = db.get_stats(30)
+    
+    if not stats.empty:
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("🚀 Всего запусков", len(stats))
+        with col2:
+            st.metric("📁 Обработано файлов", int(stats['files_processed'].sum()))
+        with col3:
+            st.metric("📦 Отправлено товаров", int(stats['offers_sent'].sum()))
+        with col4:
+            st.metric("❌ Всего ошибок", int(stats['errors'].sum()))
+        with col5:
+            avg_time = stats['duration_seconds'].mean()
+            st.metric("⏱️ Среднее время", f"{avg_time:.1f}с")
+        
+        if len(stats) > 1:
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            fig.add_trace(
+                go.Bar(x=stats['run_date'], y=stats['files_processed'], name="Файлы"),
+                secondary_y=False
+            )
+            
+            fig.add_trace(
+                go.Scatter(x=stats['run_date'], y=stats['offers_sent'], name="Товары", mode='lines+markers'),
+                secondary_y=True
+            )
+            
+            fig.update_layout(
+                title='Активность робота',
+                xaxis_title='Дата',
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    alerts = db.get_unresolved_alerts()
+    if not alerts.empty:
+        st.subheader("⚠️ Системные предупреждения")
+        for _, alert in alerts.head(5).iterrows():
+            severity_color = {
+                'critical': '🔴',
+                'error': '🟠',
+                'warning': '🟡',
+                'info': '🔵'
+            }.get(alert['severity'], '⚪')
+            
+            st.warning(f"{severity_color} **{alert['title']}** - {alert['created_at'][:19]}")
 
 
 def render_supplier_settings(prefix: str = "") -> None:
-"""
-Расширенный интерфейс управления поставщиками.
-
-Args:
-prefix: Префикс для ключей элементов (чтобы избежать дублирования при вызове из разных мест)
-"""
-st.subheader("📋 Управление поставщиками")
-
-suppliers = st.session_state.config.suppliers
-
-if suppliers:
-active_count = sum(1 for s in suppliers if s.get('enabled', True))
-with_mapping = sum(1 for s in suppliers if any(s.get('column_mapping', {}).values()))
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Всего поставщиков", len(suppliers))
-with col2:
-    st.metric("Активных", active_count)
-with col3:
-    st.metric("С настроенным маппингом", with_mapping)
-
-if suppliers:
-st.subheader("📋 Список поставщиков")
-
-for i, supplier in enumerate(suppliers):
-    with st.expander(
-        f"{'✅' if supplier.get('enabled', True) else '❌'} {supplier.get('name', 'Unknown')}",
-        expanded=False
-    ):
+    """
+    Расширенный интерфейс управления поставщиками.
+    
+    Args:
+        prefix: Префикс для ключей элементов (чтобы избежать дублирования при вызове из разных мест)
+    """
+    st.subheader("📋 Управление поставщиками")
+    
+    suppliers = st.session_state.config.suppliers
+    
+    if suppliers:
+        active_count = sum(1 for s in suppliers if s.get('enabled', True))
+        with_mapping = sum(1 for s in suppliers if any(s.get('column_mapping', {}).values()))
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Всего поставщиков", len(suppliers))
+        with col2:
+            st.metric("Активных", active_count)
+        with col3:
+            st.metric("С настроенным маппингом", with_mapping)
+    
+    if suppliers:
+        st.subheader("📋 Список поставщиков")
+        
+        for i, supplier in enumerate(suppliers):
+            with st.expander(
+                f"{'✅' if supplier.get('enabled', True) else '❌'} {supplier.get('name', 'Unknown')}",
+                expanded=False
+            ):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write(f"**Email:** {supplier.get('email', '')}")
+                    st.write(f"**IMAP:** {supplier.get('imap_server', '')}:{supplier.get('imap_port', 993)}")
+                    st.write(f"**Тема:** {supplier.get('subject_filter', '(все)')}")
+                    st.write(f"**Отправитель:** {supplier.get('sender_filter', '(все)')}")
+                
+                with col2:
+                    mapping = supplier.get('column_mapping', {})
+                    if mapping and any(mapping.values()):
+                        st.write("**Маппинг:**")
+                        for field, col in mapping.items():
+                            if col:
+                                st.write(f"  • {field} → `{col}`")
+                    else:
+                        st.warning("⚠️ Маппинг не настроен")
+                    
+                    stats = supplier.get('stats', {})
+                    if stats:
+                        st.write(f"**Успешных синхронизаций:** {stats.get('total_files_processed', 0)}")
+                        st.write(f"**Загружено товаров:** {stats.get('total_products_loaded', 0)}")
+                        success_rate = stats.get('success_rate', 0)
+                        st.progress(success_rate / 100, text=f"Успешность: {success_rate:.1f}%")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if st.button("🔄 Синхронизировать", key=f"sync_supplier_{prefix}_{i}", use_container_width=True):
+                        robot = PriceRobot(st.session_state.config, st.session_state.logger)
+                        result = robot.run_single_supplier(supplier.get('name', ''))
+                        if result['status'] == 'success':
+                            st.success(f"✅ Синхронизировано файлов: {result.get('files_processed', 0)}")
+                        else:
+                            st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+                
+                with col2:
+                    new_enabled = not supplier.get('enabled', True)
+                    if st.button(
+                        "🔴 Деактивировать" if supplier.get('enabled', True) else "🟢 Активировать",
+                        key=f"toggle_supplier_{prefix}_{i}",
+                        use_container_width=True
+                    ):
+                        supplier['enabled'] = new_enabled
+                        st.session_state.config._save_suppliers()
+                        st.rerun()
+                
+                with col3:
+                    if st.button("🗑️ Удалить", key=f"delete_supplier_{prefix}_{i}", use_container_width=True):
+                        if st.session_state.get(f"confirm_delete_supplier_{prefix}_{i}", False):
+                            st.session_state.config.suppliers.pop(i)
+                            st.session_state.config._save_suppliers()
+                            st.success("✅ Поставщик удален")
+                            st.rerun()
+                        else:
+                            st.session_state[f"confirm_delete_supplier_{prefix}_{i}"] = True
+                            st.warning("⚠️ Нажмите еще раз для подтверждения удаления")
+    
+    with st.expander("➕ Добавить нового поставщика", expanded=not suppliers):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.write(f"**Email:** {supplier.get('email', '')}")
-            st.write(f"**IMAP:** {supplier.get('imap_server', '')}:{supplier.get('imap_port', 993)}")
-            st.write(f"**Тема:** {supplier.get('subject_filter', '(все)')}")
-            st.write(f"**Отправитель:** {supplier.get('sender_filter', '(все)')}")
+            new_name = st.text_input("Название поставщика*", key=f"new_supplier_name_{prefix}")
+            new_email = st.text_input("Email*", key=f"new_supplier_email_{prefix}")
+            new_password = st.text_input("Пароль*", type="password", key=f"new_supplier_password_{prefix}")
+            new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key=f"new_supplier_imap_{prefix}")
+            new_port = st.number_input("IMAP порт", value=993, step=1, key=f"new_supplier_port_{prefix}")
         
         with col2:
-            mapping = supplier.get('column_mapping', {})
-            if mapping and any(mapping.values()):
-                st.write("**Маппинг:**")
-                for field, col in mapping.items():
-                    if col:
-                        st.write(f"  • {field} → `{col}`")
+            new_subject = st.text_input("Фильтр по теме", placeholder="прайс", key=f"new_supplier_subject_{prefix}")
+            new_sender = st.text_input("Фильтр по отправителю", key=f"new_supplier_sender_{prefix}")
+            new_priority = st.number_input("Приоритет", value=0, step=1, key=f"new_supplier_priority_{prefix}")
+            new_markup = st.number_input("Индивидуальная наценка (%)", value=0.0, step=0.5, key=f"new_supplier_markup_{prefix}")
+            new_enabled = st.checkbox("Активен", value=True, key=f"new_supplier_enabled_{prefix}")
+        
+        if st.button("✅ Добавить поставщика", type="primary", use_container_width=True, key=f"add_supplier_{prefix}_btn"):
+            if not new_name or not new_email or not new_password:
+                st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
             else:
-                st.warning("⚠️ Маппинг не настроен")
+                new_supplier = SupplierConfig(
+                    name=new_name,
+                    email=new_email,
+                    email_password=new_password,
+                    imap_server=new_imap,
+                    imap_port=new_port,
+                    subject_filter=new_subject,
+                    sender_filter=new_sender,
+                    enabled=new_enabled,
+                    priority=new_priority,
+                    custom_markup=new_markup
+                )
+                
+                st.session_state.config.suppliers.append(new_supplier.to_dict())
+                st.session_state.config._save_suppliers()
+                st.success(f"✅ Поставщик {new_name} добавлен!")
+                st.rerun()
+
+
+def render_analysis_tab() -> None:
+    """Расширенный интерфейс аналитики"""
+    st.subheader("📊 Аналитика прайсов поставщиков")
+    
+    if st.button("🚀 Запустить анализ", type="primary", use_container_width=True, key="run_analysis_btn"):
+        if not st.session_state.config.suppliers:
+            st.error("❌ Сначала добавьте поставщиков в настройках")
+        else:
+            run_analysis()
+    
+    st.divider()
+    
+    if 'analysis_result' in st.session_state and st.session_state.analysis_result is not None:
+        df = st.session_state.analysis_result
+        
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        
+        with col1:
+            st.metric("📦 Уникальных SKU", len(df))
+        with col2:
+            st.metric("🏷️ Поставщиков", df['best_supplier'].nunique())
+        with col3:
+            st.metric("💰 Средняя цена", f"{df['min_price'].mean():.2f} ₽")
+        with col4:
+            st.metric("⬇️ Мин. цена", f"{df['min_price'].min():.2f} ₽")
+        with col5:
+            st.metric("📊 Медиана", f"{df['median_price'].median():.2f} ₽")
+        with col6:
+            st.metric("💵 Экономия", f"{df['price_diff'].sum():.2f} ₽")
+        
+        st.subheader("🔍 Фильтры")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            search_query = st.text_input("Поиск по SKU", placeholder="Введите артикул...", key="analysis_search_sku")
+        
+        with col2:
+            suppliers_list = ['Все'] + sorted(df['best_supplier'].unique().tolist())
+            selected_supplier = st.selectbox("Поставщик", suppliers_list, key="analysis_select_supplier")
+        
+        with col3:
+            categories = ['Все'] + sorted(df['category'].dropna().unique().tolist())
+            selected_category = st.selectbox("Категория", categories, key="analysis_select_category")
+        
+        with col4:
+            min_diff = st.number_input("Мин. разница цен (%)", value=0.0, step=1.0, key="analysis_min_diff")
+        
+        filtered_df = df.copy()
+        
+        if search_query:
+            filtered_df = filtered_df[filtered_df['sku'].str.contains(search_query, case=False, na=False)]
+        
+        if selected_supplier != 'Все':
+            filtered_df = filtered_df[filtered_df['best_supplier'] == selected_supplier]
+        
+        if selected_category != 'Все':
+            filtered_df = filtered_df[filtered_df['category'] == selected_category]
+        
+        if min_diff > 0:
+            filtered_df = filtered_df[filtered_df['price_diff_percent'] >= min_diff]
+        
+        st.subheader(f"📋 Результаты ({len(filtered_df)} товаров)")
+        
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Таблица",
+            "📈 Графики",
+            "🏆 Лучшие предложения",
+            "💡 Арбитраж"
+        ])
+        
+        with tab1:
+            st.dataframe(
+                filtered_df,
+                use_container_width=True,
+                height=600,
+                column_config={
+                    "sku": "Артикул",
+                    "brand": "Бренд",
+                    "name": "Название",
+                    "min_price": st.column_config.NumberColumn("Мин. цена", format="%.2f ₽"),
+                    "best_supplier": "Лучший поставщик",
+                    "price_diff": st.column_config.NumberColumn("Разница", format="%.2f ₽"),
+                    "price_diff_percent": st.column_config.NumberColumn("Разница %", format="%.1f%%"),
+                    "suppliers_count": "Поставщиков"
+                },
+                hide_index=True
+            )
+        
+        with tab2:
+            col1, col2 = st.columns(2)
             
-            stats = supplier.get('stats', {})
-            if stats:
-                st.write(f"**Успешных синхронизаций:** {stats.get('total_files_processed', 0)}")
-                st.write(f"**Загружено товаров:** {stats.get('total_products_loaded', 0)}")
-                success_rate = stats.get('success_rate', 0)
-                st.progress(success_rate / 100, text=f"Успешность: {success_rate:.1f}%")
+            with col1:
+                top_cheap = filtered_df.nsmallest(10, 'min_price')
+                fig = px.bar(
+                    top_cheap,
+                    x='sku',
+                    y='min_price',
+                    title='Топ-10 самых дешевых товаров',
+                    labels={'min_price': 'Цена (₽)', 'sku': 'Артикул'},
+                    color='min_price',
+                    color_continuous_scale='greens'
+                )
+                st.plotly_chart(fig, use_container_width=True, key="chart_cheap_products")
+            
+            with col2:
+                fig = px.histogram(
+                    filtered_df,
+                    x='min_price',
+                    title='Распределение цен',
+                    labels={'min_price': 'Цена (₽)'},
+                    nbins=30,
+                    color_discrete_sequence=['blue']
+                )
+                st.plotly_chart(fig, use_container_width=True, key="chart_price_distribution")
+            
+            supplier_performance = filtered_df['best_supplier'].value_counts().head(10)
+            fig = px.pie(
+                values=supplier_performance.values,
+                names=supplier_performance.index,
+                title='Доля лучших предложений по поставщикам'
+            )
+            st.plotly_chart(fig, use_container_width=True, key="chart_supplier_performance")
+        
+        with tab3:
+            if st.session_state.analyzer:
+                best_prices = st.session_state.analyzer.get_best_prices_by_category(filtered_df)
+                if not best_prices.empty:
+                    st.dataframe(best_prices, use_container_width=True, hide_index=True)
+                
+                supplier_perf = st.session_state.analyzer.get_supplier_performance(filtered_df)
+                if not supplier_perf.empty:
+                    st.subheader("🏆 Эффективность поставщиков")
+                    st.dataframe(supplier_perf, use_container_width=True, hide_index=True)
+        
+        with tab4:
+            if st.session_state.analyzer:
+                opportunities = st.session_state.analyzer.find_arbitrage_opportunities(
+                    filtered_df, 
+                    min_margin_percent=10.0
+                )
+                
+                if not opportunities.empty:
+                    st.success(f"Найдено {len(opportunities)} возможностей для арбитража")
+                    st.dataframe(
+                        opportunities,
+                        use_container_width=True,
+                        column_config={
+                            "sku": "Артикул",
+                            "buy_from": "Купить у",
+                            "buy_price": st.column_config.NumberColumn("Цена покупки", format="%.2f ₽"),
+                            "sell_price": st.column_config.NumberColumn("Цена продажи", format="%.2f ₽"),
+                            "margin": st.column_config.NumberColumn("Маржа", format="%.2f ₽"),
+                            "margin_percent": st.column_config.NumberColumn("Маржа %", format="%.1f%%")
+                        },
+                        hide_index=True
+                    )
+                else:
+                    st.info("Возможностей для арбитража не найдено (минимальная маржа: 10%)")
+        
+        st.subheader("📥 Экспорт результатов")
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🔄 Синхронизировать", key=f"sync_supplier_{prefix}_{i}", use_container_width=True):
-                robot = PriceRobot(st.session_state.config, st.session_state.logger)
-                result = robot.run_single_supplier(supplier.get('name', ''))
-                if result['status'] == 'success':
-                    st.success(f"✅ Синхронизировано файлов: {result.get('files_processed', 0)}")
-                else:
-                    st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+            if st.button("📥 CSV", use_container_width=True, key="export_csv_btn"):
+                if st.session_state.analyzer:
+                    filepath = st.session_state.analyzer.export_to_csv(filtered_df)
+                    with open(filepath, 'rb') as f:
+                        st.download_button(
+                            "📥 Скачать CSV",
+                            f.read(),
+                            os.path.basename(filepath),
+                            "text/csv",
+                            key="download_csv_btn"
+                        )
         
         with col2:
-            new_enabled = not supplier.get('enabled', True)
-            if st.button(
-                "🔴 Деактивировать" if supplier.get('enabled', True) else "🟢 Активировать",
-                key=f"toggle_supplier_{prefix}_{i}",
-                use_container_width=True
-            ):
-                supplier['enabled'] = new_enabled
-                st.session_state.config._save_suppliers()
-                st.rerun()
+            if st.button("📥 Excel", use_container_width=True, key="export_excel_btn"):
+                if st.session_state.analyzer:
+                    filepath = st.session_state.analyzer.export_to_excel(filtered_df)
+                    with open(filepath, 'rb') as f:
+                        st.download_button(
+                            "📥 Скачать Excel",
+                            f.read(),
+                            os.path.basename(filepath),
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_excel_btn"
+                        )
         
         with col3:
-            if st.button("🗑️ Удалить", key=f"delete_supplier_{prefix}_{i}", use_container_width=True):
-                if st.session_state.get(f"confirm_delete_supplier_{prefix}_{i}", False):
-                    st.session_state.config.suppliers.pop(i)
-                    st.session_state.config._save_suppliers()
-                    st.success("✅ Поставщик удален")
-                    st.rerun()
-                else:
-                    st.session_state[f"confirm_delete_supplier_{prefix}_{i}"] = True
-                    st.warning("⚠️ Нажмите еще раз для подтверждения удаления")
+            if st.button("📊 Полный отчет", use_container_width=True, key="export_report_btn"):
+                if st.session_state.analyzer:
+                    filepath = st.session_state.analyzer.generate_price_report(filtered_df)
+                    with open(filepath, 'rb') as f:
+                        st.download_button(
+                            "📥 Скачать отчет",
+                            f.read(),
+                            os.path.basename(filepath),
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_report_btn"
+                        )
 
-with st.expander("➕ Добавить нового поставщика", expanded=not suppliers):
-col1, col2 = st.columns(2)
 
-with col1:
-    new_name = st.text_input("Название поставщика*", key=f"new_supplier_name_{prefix}")
-    new_email = st.text_input("Email*", key=f"new_supplier_email_{prefix}")
-    new_password = st.text_input("Пароль*", type="password", key=f"new_supplier_password_{prefix}")
-    new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key=f"new_supplier_imap_{prefix}")
-    new_port = st.number_input("IMAP порт", value=993, step=1, key=f"new_supplier_port_{prefix}")
-
-with col2:
-    new_subject = st.text_input("Фильтр по теме", placeholder="прайс", key=f"new_supplier_subject_{prefix}")
-    new_sender = st.text_input("Фильтр по отправителю", key=f"new_supplier_sender_{prefix}")
-    new_priority = st.number_input("Приоритет", value=0, step=1, key=f"new_supplier_priority_{prefix}")
-    new_markup = st.number_input("Индивидуальная наценка (%)", value=0.0, step=0.5, key=f"new_supplier_markup_{prefix}")
-    new_enabled = st.checkbox("Активен", value=True, key=f"new_supplier_enabled_{prefix}")
-
-if st.button("✅ Добавить поставщика", type="primary", use_container_width=True, key=f"add_supplier_{prefix}_btn"):
-    if not new_name or not new_email or not new_password:
-        st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
+def render_products_tab() -> None:
+    """Вкладка базы товаров"""
+    st.subheader("📦 База товаров (Google Sheets)")
+    
+    if st.session_state.product_db is None:
+        st.error("❌ Не удалось подключиться к Google Sheets")
+        st.info("💡 Перейдите во вкладку 'Google Sheets' для настройки подключения")
+        return
+    
+    df = st.session_state.product_db.get_all_products()
+    
+    if df.empty:
+        st.warning("База товаров пуста")
     else:
-        new_supplier = SupplierConfig(
-            name=new_name,
-            email=new_email,
-            email_password=new_password,
-            imap_server=new_imap,
-            imap_port=new_port,
-            subject_filter=new_subject,
-            sender_filter=new_sender,
-            enabled=new_enabled,
-            priority=new_priority,
-            custom_markup=new_markup
-        )
+        stats = st.session_state.product_db.get_stats()
         
-        st.session_state.config.suppliers.append(new_supplier.to_dict())
-        st.session_state.config._save_suppliers()
-        st.success(f"✅ Поставщик {new_name} добавлен!")
-        st.rerun()
-
-
-def render_analysis_tab() -> None:
-"""Расширенный интерфейс аналитики"""
-st.subheader("📊 Аналитика прайсов поставщиков")
-
-if st.button("🚀 Запустить анализ", type="primary", use_container_width=True, key="run_analysis_btn"):
-if not st.session_state.config.suppliers:
-    st.error("❌ Сначала добавьте поставщиков в настройках")
-else:
-    run_analysis()
-
-st.divider()
-
-if 'analysis_result' in st.session_state and st.session_state.analysis_result is not None:
-df = st.session_state.analysis_result
-
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-
-with col1:
-    st.metric("📦 Уникальных SKU", len(df))
-with col2:
-    st.metric("🏷️ Поставщиков", df['best_supplier'].nunique())
-with col3:
-    st.metric("💰 Средняя цена", f"{df['min_price'].mean():.2f} ₽")
-with col4:
-    st.metric("⬇️ Мин. цена", f"{df['min_price'].min():.2f} ₽")
-with col5:
-    st.metric("📊 Медиана", f"{df['median_price'].median():.2f} ₽")
-with col6:
-    st.metric("💵 Экономия", f"{df['price_diff'].sum():.2f} ₽")
-
-st.subheader("🔍 Фильтры")
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    search_query = st.text_input("Поиск по SKU", placeholder="Введите артикул...", key="analysis_search_sku")
-
-with col2:
-    suppliers_list = ['Все'] + sorted(df['best_supplier'].unique().tolist())
-    selected_supplier = st.selectbox("Поставщик", suppliers_list, key="analysis_select_supplier")
-
-with col3:
-    categories = ['Все'] + sorted(df['category'].dropna().unique().tolist())
-    selected_category = st.selectbox("Категория", categories, key="analysis_select_category")
-
-with col4:
-    min_diff = st.number_input("Мин. разница цен (%)", value=0.0, step=1.0, key="analysis_min_diff")
-
-filtered_df = df.copy()
-
-if search_query:
-    filtered_df = filtered_df[filtered_df['sku'].str.contains(search_query, case=False, na=False)]
-
-if selected_supplier != 'Все':
-    filtered_df = filtered_df[filtered_df['best_supplier'] == selected_supplier]
-
-if selected_category != 'Все':
-    filtered_df = filtered_df[filtered_df['category'] == selected_category]
-
-if min_diff > 0:
-    filtered_df = filtered_df[filtered_df['price_diff_percent'] >= min_diff]
-
-st.subheader(f"📋 Результаты ({len(filtered_df)} товаров)")
-
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Таблица",
-    "📈 Графики",
-    "🏆 Лучшие предложения",
-    "💡 Арбитраж"
-])
-
-with tab1:
-    st.dataframe(
-        filtered_df,
-        use_container_width=True,
-        height=600,
-        column_config={
-            "sku": "Артикул",
-            "brand": "Бренд",
-            "name": "Название",
-            "min_price": st.column_config.NumberColumn("Мин. цена", format="%.2f ₽"),
-            "best_supplier": "Лучший поставщик",
-            "price_diff": st.column_config.NumberColumn("Разница", format="%.2f ₽"),
-            "price_diff_percent": st.column_config.NumberColumn("Разница %", format="%.1f%%"),
-            "suppliers_count": "Поставщиков"
-        },
-        hide_index=True
-    )
-
-with tab2:
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        top_cheap = filtered_df.nsmallest(10, 'min_price')
-        fig = px.bar(
-            top_cheap,
-            x='sku',
-            y='min_price',
-            title='Топ-10 самых дешевых товаров',
-            labels={'min_price': 'Цена (₽)', 'sku': 'Артикул'},
-            color='min_price',
-            color_continuous_scale='greens'
-        )
-        st.plotly_chart(fig, use_container_width=True, key="chart_cheap_products")
-    
-    with col2:
-        fig = px.histogram(
-            filtered_df,
-            x='min_price',
-            title='Распределение цен',
-            labels={'min_price': 'Цена (₽)'},
-            nbins=30,
-            color_discrete_sequence=['blue']
-        )
-        st.plotly_chart(fig, use_container_width=True, key="chart_price_distribution")
-    
-    supplier_performance = filtered_df['best_supplier'].value_counts().head(10)
-    fig = px.pie(
-        values=supplier_performance.values,
-        names=supplier_performance.index,
-        title='Доля лучших предложений по поставщикам'
-    )
-    st.plotly_chart(fig, use_container_width=True, key="chart_supplier_performance")
-
-with tab3:
-    if st.session_state.analyzer:
-        best_prices = st.session_state.analyzer.get_best_prices_by_category(filtered_df)
-        if not best_prices.empty:
-            st.dataframe(best_prices, use_container_width=True, hide_index=True)
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("📦 Всего", stats['total_products'])
+        with col2:
+            st.metric("🏷️ Брендов", stats['total_brands'])
+        with col3:
+            st.metric("💰 Средняя цена", f"{stats['avg_price']:.0f} ₽")
+        with col4:
+            st.metric("📦 В наличии", stats['products_with_stock'])
+        with col5:
+            st.metric("💵 Общая стоимость", f"{stats['total_value']:,.0f} ₽")
         
-        supplier_perf = st.session_state.analyzer.get_supplier_performance(filtered_df)
-        if not supplier_perf.empty:
-            st.subheader("🏆 Эффективность поставщиков")
-            st.dataframe(supplier_perf, use_container_width=True, hide_index=True)
-
-with tab4:
-    if st.session_state.analyzer:
-        opportunities = st.session_state.analyzer.find_arbitrage_opportunities(
-            filtered_df, 
-            min_margin_percent=10.0
-        )
-        
-        if not opportunities.empty:
-            st.success(f"Найдено {len(opportunities)} возможностей для арбитража")
-            st.dataframe(
-                opportunities,
-                use_container_width=True,
-                column_config={
-                    "sku": "Артикул",
-                    "buy_from": "Купить у",
-                    "buy_price": st.column_config.NumberColumn("Цена покупки", format="%.2f ₽"),
-                    "sell_price": st.column_config.NumberColumn("Цена продажи", format="%.2f ₽"),
-                    "margin": st.column_config.NumberColumn("Маржа", format="%.2f ₽"),
-                    "margin_percent": st.column_config.NumberColumn("Маржа %", format="%.1f%%")
-                },
-                hide_index=True
+        if st.session_state.config.google_sheet_id:
+            st.markdown(
+                f"🔗 [Открыть Google Sheets](https://docs.google.com/spreadsheets/d/"
+                f"{st.session_state.config.google_sheet_id})"
             )
-        else:
-            st.info("Возможностей для арбитража не найдено (минимальная маржа: 10%)")
-
-st.subheader("📥 Экспорт результатов")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("📥 CSV", use_container_width=True, key="export_csv_btn"):
-        if st.session_state.analyzer:
-            filepath = st.session_state.analyzer.export_to_csv(filtered_df)
-            with open(filepath, 'rb') as f:
-                st.download_button(
-                    "📥 Скачать CSV",
-                    f.read(),
-                    os.path.basename(filepath),
-                    "text/csv",
-                    key="download_csv_btn"
-                )
-
-with col2:
-    if st.button("📥 Excel", use_container_width=True, key="export_excel_btn"):
-        if st.session_state.analyzer:
-            filepath = st.session_state.analyzer.export_to_excel(filtered_df)
+        
+        search_query = st.text_input("🔍 Поиск по базе", 
+                                   placeholder="Введите артикул, бренд или название...",
+                                   key="products_search")
+        
+        if search_query:
+            df = st.session_state.product_db.search_products(search_query)
+            st.write(f"Найдено: {len(df)} товаров")
+        
+        st.dataframe(
+            df,
+            use_container_width=True,
+            column_config={
+                "артикул": "Артикул",
+                "бренд": "Бренд",
+                "название": "Название",
+                "цена_розница": st.column_config.NumberColumn("Цена", format="%.2f ₽"),
+                "остаток": "Остаток",
+                "категория": "Категория"
+            },
+            height=500,
+            hide_index=True
+        )
+        
+        if st.button("📥 Экспортировать базу в Excel", key="export_products_btn"):
+            filepath = st.session_state.product_db.export_to_excel()
             with open(filepath, 'rb') as f:
                 st.download_button(
                     "📥 Скачать Excel",
                     f.read(),
                     os.path.basename(filepath),
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_excel_btn"
+                    key="download_products_btn"
                 )
-
-with col3:
-    if st.button("📊 Полный отчет", use_container_width=True, key="export_report_btn"):
-        if st.session_state.analyzer:
-            filepath = st.session_state.analyzer.generate_price_report(filtered_df)
-            with open(filepath, 'rb') as f:
-                st.download_button(
-                    "📥 Скачать отчет",
-                    f.read(),
-                    os.path.basename(filepath),
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_report_btn"
-                )
-
-
-def render_products_tab() -> None:
-"""Вкладка базы товаров"""
-st.subheader("📦 База товаров (Google Sheets)")
-
-if st.session_state.product_db is None:
-st.error("❌ Не удалось подключиться к Google Sheets")
-st.info("💡 Перейдите во вкладку 'Google Sheets' для настройки подключения")
-return
-
-df = st.session_state.product_db.get_all_products()
-
-if df.empty:
-st.warning("База товаров пуста")
-else:
-stats = st.session_state.product_db.get_stats()
-
-col1, col2, col3, col4, col5 = st.columns(5)
-with col1:
-    st.metric("📦 Всего", stats['total_products'])
-with col2:
-    st.metric("🏷️ Брендов", stats['total_brands'])
-with col3:
-    st.metric("💰 Средняя цена", f"{stats['avg_price']:.0f} ₽")
-with col4:
-    st.metric("📦 В наличии", stats['products_with_stock'])
-with col5:
-    st.metric("💵 Общая стоимость", f"{stats['total_value']:,.0f} ₽")
-
-if st.session_state.config.google_sheet_id:
-    st.markdown(
-        f"🔗 [Открыть Google Sheets](https://docs.google.com/spreadsheets/d/"
-        f"{st.session_state.config.google_sheet_id})"
-    )
-
-search_query = st.text_input("🔍 Поиск по базе", 
-                           placeholder="Введите артикул, бренд или название...",
-                           key="products_search")
-
-if search_query:
-    df = st.session_state.product_db.search_products(search_query)
-    st.write(f"Найдено: {len(df)} товаров")
-
-st.dataframe(
-    df,
-    use_container_width=True,
-    column_config={
-        "артикул": "Артикул",
-        "бренд": "Бренд",
-        "название": "Название",
-        "цена_розница": st.column_config.NumberColumn("Цена", format="%.2f ₽"),
-        "остаток": "Остаток",
-        "категория": "Категория"
-    },
-    height=500,
-    hide_index=True
-)
-
-if st.button("📥 Экспортировать базу в Excel", key="export_products_btn"):
-    filepath = st.session_state.product_db.export_to_excel()
-    with open(filepath, 'rb') as f:
-        st.download_button(
-            "📥 Скачать Excel",
-            f.read(),
-            os.path.basename(filepath),
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="download_products_btn"
-        )
 
 
 def render_logs_tab() -> None:
-"""Вкладка логов"""
-st.subheader("📝 Логи выполнения")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-log_level_filter = st.selectbox(
-    "Уровень",
-    ['ALL', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'SUCCESS', 'DEBUG'],
-    key="log_level_filter"
-)
-
-with col2:
-log_count = st.number_input("Количество", value=100, step=50, key="log_count")
-
-with col3:
-log_search = st.text_input("Поиск в логах", key="log_search")
-
-log_container = st.container(height=500)
-
-with log_container:
-logs = st.session_state.logger.get_logs(log_count)
-
-if log_level_filter != 'ALL':
-    logs = [log for log in logs if log['level'] == log_level_filter]
-
-if log_search:
-    logs = [log for log in logs if log_search.lower() in log['message'].lower()]
-
-for log in logs:
-    level = log['level']
-    message = log['message']
-    timestamp = log['timestamp'][:19]
+    """Вкладка логов"""
+    st.subheader("📝 Логи выполнения")
     
-    if level in ['ERROR', 'CRITICAL']:
-        st.error(f"[{timestamp}] {message}")
-    elif level == 'WARNING':
-        st.warning(f"[{timestamp}] {message}")
-    elif level == 'SUCCESS':
-        st.success(f"[{timestamp}] {message}")
-    elif level == 'DEBUG':
-        st.caption(f"[{timestamp}] {message}")
-    else:
-        st.info(f"[{timestamp}] {message}")
-
-col1, col2 = st.columns(2)
-
-with col1:
-if st.button("📥 Экспорт логов (JSON)", use_container_width=True, key="export_logs_json_btn"):
-    filepath = st.session_state.logger.export_logs('json')
-    with open(filepath, 'rb') as f:
-        st.download_button(
-            "📥 Скачать JSON",
-            f.read(),
-            os.path.basename(filepath),
-            "application/json",
-            key="download_logs_json_btn"
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        log_level_filter = st.selectbox(
+            "Уровень",
+            ['ALL', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'SUCCESS', 'DEBUG'],
+            key="log_level_filter"
         )
-
-with col2:
-if st.button("🔄 Обновить логи", use_container_width=True, key="refresh_logs_btn"):
-    st.rerun()
+    
+    with col2:
+        log_count = st.number_input("Количество", value=100, step=50, key="log_count")
+    
+    with col3:
+        log_search = st.text_input("Поиск в логах", key="log_search")
+    
+    log_container = st.container(height=500)
+    
+    with log_container:
+        logs = st.session_state.logger.get_logs(log_count)
+        
+        if log_level_filter != 'ALL':
+            logs = [log for log in logs if log['level'] == log_level_filter]
+        
+        if log_search:
+            logs = [log for log in logs if log_search.lower() in log['message'].lower()]
+        
+        for log in logs:
+            level = log['level']
+            message = log['message']
+            timestamp = log['timestamp'][:19]
+            
+            if level in ['ERROR', 'CRITICAL']:
+                st.error(f"[{timestamp}] {message}")
+            elif level == 'WARNING':
+                st.warning(f"[{timestamp}] {message}")
+            elif level == 'SUCCESS':
+                st.success(f"[{timestamp}] {message}")
+            elif level == 'DEBUG':
+                st.caption(f"[{timestamp}] {message}")
+            else:
+                st.info(f"[{timestamp}] {message}")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📥 Экспорт логов (JSON)", use_container_width=True, key="export_logs_json_btn"):
+            filepath = st.session_state.logger.export_logs('json')
+            with open(filepath, 'rb') as f:
+                st.download_button(
+                    "📥 Скачать JSON",
+                    f.read(),
+                    os.path.basename(filepath),
+                    "application/json",
+                    key="download_logs_json_btn"
+                )
+    
+    with col2:
+        if st.button("🔄 Обновить логи", use_container_width=True, key="refresh_logs_btn"):
+            st.rerun()
 
 
 def render_settings_sidebar() -> None:
-"""Расширенная боковая панель настроек"""
-with st.sidebar:
-st.header("⚙️ Настройки")
-
-settings_tab1, settings_tab2, settings_tab3, settings_tab4, settings_tab5 = st.tabs([
-    "📧 Почта", "🏪 Маркет", "📊 Sheets", "💰 Цены", "🔔 Уведомления"
-])
-
-with settings_tab1:
-    st.text_input("IMAP сервер", key="imap_server", 
-                 value=st.session_state.config.imap_server)
-    st.number_input("IMAP порт", key="imap_port", 
-                  value=st.session_state.config.imap_port, step=1)
-    st.text_input("Email", key="email_user", 
-                 value=st.session_state.config.email_user)
-    st.text_input("Пароль", key="email_pass", 
-                 value=st.session_state.config.email_pass, type="password")
-    st.number_input("Искать за дней", key="email_search_days", 
-                  value=st.session_state.config.email_search_days, step=1)
-    st.number_input("Макс. писем", key="email_max_emails", 
-                  value=st.session_state.config.email_max_emails, step=5)
-    st.checkbox("Помечать прочитанными", key="email_mark_as_read",
-               value=st.session_state.config.email_mark_as_read)
-
-with settings_tab2:
-    st.text_input("OAuth токен", key="yandex_token", 
-                 value=st.session_state.config.yandex_token, type="password")
-    st.number_input("ID кампании", key="campaign_id", 
-                  value=st.session_state.config.campaign_id, step=1)
-    st.number_input("ID склада", key="warehouse_id", 
-                  value=st.session_state.config.warehouse_id, step=1)
-    st.checkbox("Автообновление", key="yandex_auto_update",
-               value=st.session_state.config.yandex_auto_update)
-
-with settings_tab3:
-    st.text_input("ID таблицы", key="google_sheet_id", 
-                 value=st.session_state.config.google_sheet_id)
-    st.text_input("Название листа", key="google_sheet_name", 
-                 value=st.session_state.config.google_sheet_name)
-    st.checkbox("Использовать публичный доступ", key="use_public_access",
-               value=st.session_state.config.use_public_access)
-    
-    if os.path.exists(st.session_state.config.google_credentials_json):
-        st.success(f"✅ Файл ключей найден")
-    else:
-        st.warning(f"⚠️ Файл ключей не найден")
-
-with settings_tab4:
-    st.number_input("Наценка (%)", key="markup_percent", 
-                  value=st.session_state.config.markup_percent, step=0.5)
-    st.number_input("Мин. остаток", key="min_stock_threshold", 
-                  value=st.session_state.config.min_stock_threshold, step=1)
-    st.number_input("Товаров в запросе", key="max_offers_per_request", 
-                  value=st.session_state.config.max_offers_per_request, step=50)
-    st.number_input("Потоков", key="max_workers", 
-                  value=st.session_state.config.max_workers, step=1)
-
-with settings_tab5:
-    notification_config = st.session_state.config.notification_config
-    st.checkbox("Включить уведомления", key="notifications_enabled",
-               value=notification_config.get('enabled', False))
-    st.checkbox("Email уведомления", key="email_notifications",
-               value=notification_config.get('email_notifications', False))
-    st.checkbox("Telegram уведомления", key="telegram_enabled",
-               value=notification_config.get('telegram_enabled', False))
-
-if st.button("💾 Сохранить настройки", use_container_width=True, type="primary", key="save_settings_sidebar_btn"):
-    config = st.session_state.config
-    
-    config.imap_server = st.session_state.imap_server
-    config.imap_port = int(st.session_state.imap_port)
-    config.email_user = st.session_state.email_user
-    config.email_pass = st.session_state.email_pass
-    config.email_search_days = int(st.session_state.email_search_days)
-    config.email_max_emails = int(st.session_state.email_max_emails)
-    config.email_mark_as_read = st.session_state.email_mark_as_read
-    
-    config.yandex_token = st.session_state.yandex_token
-    config.campaign_id = int(st.session_state.campaign_id)
-    config.warehouse_id = int(st.session_state.warehouse_id)
-    config.yandex_auto_update = st.session_state.yandex_auto_update
-    
-    config.google_sheet_id = st.session_state.google_sheet_id
-    config.google_sheet_name = st.session_state.google_sheet_name
-    config.use_public_access = st.session_state.use_public_access
-    
-    config.markup_percent = float(st.session_state.markup_percent)
-    config.min_stock_threshold = int(st.session_state.min_stock_threshold)
-    config.max_offers_per_request = int(st.session_state.max_offers_per_request)
-    config.max_workers = int(st.session_state.max_workers)
-    
-    config.notification_config = {
-        'enabled': st.session_state.notifications_enabled,
-        'email_notifications': st.session_state.email_notifications,
-        'telegram_enabled': st.session_state.telegram_enabled
-    }
-    
-    save_config()
-    st.rerun()
-
-st.divider()
-
-if st.session_state.is_running:
-    st.warning("🔄 Робот выполняется...")
-    st.progress(st.session_state.progress_value / 100)
-    st.info(f"📌 {st.session_state.progress_message}")
-    
-    if st.button("⏹️ Остановить", use_container_width=True, key="stop_robot_btn"):
-        st.session_state.is_running = False
-        st.rerun()
-else:
-    if st.button("🚀 Запустить робота", use_container_width=True, type="primary", key="start_robot_btn"):
-        run_robot()
-        st.rerun()
-
-with st.expander("🔧 Системные действия"):
-    if st.button("🧹 Очистить временные файлы", use_container_width=True, key="cleanup_temp_btn"):
-        if st.session_state.robot:
-            cleaned = st.session_state.robot.cleanup_temp_files()
-            st.success(f"Очищено {cleaned} файлов")
+    """Расширенная боковая панель настроек"""
+    with st.sidebar:
+        st.header("⚙️ Настройки")
+        
+        settings_tab1, settings_tab2, settings_tab3, settings_tab4, settings_tab5 = st.tabs([
+            "📧 Почта", "🏪 Маркет", "📊 Sheets", "💰 Цены", "🔔 Уведомления"
+        ])
+        
+        with settings_tab1:
+            st.text_input("IMAP сервер", key="imap_server", 
+                         value=st.session_state.config.imap_server)
+            st.number_input("IMAP порт", key="imap_port", 
+                          value=st.session_state.config.imap_port, step=1)
+            st.text_input("Email", key="email_user", 
+                         value=st.session_state.config.email_user)
+            st.text_input("Пароль", key="email_pass", 
+                         value=st.session_state.config.email_pass, type="password")
+            st.number_input("Искать за дней", key="email_search_days", 
+                          value=st.session_state.config.email_search_days, step=1)
+            st.number_input("Макс. писем", key="email_max_emails", 
+                          value=st.session_state.config.email_max_emails, step=5)
+            st.checkbox("Помечать прочитанными", key="email_mark_as_read",
+                       value=st.session_state.config.email_mark_as_read)
+        
+        with settings_tab2:
+            st.text_input("OAuth токен", key="yandex_token", 
+                         value=st.session_state.config.yandex_token, type="password")
+            st.number_input("ID кампании", key="campaign_id", 
+                          value=st.session_state.config.campaign_id, step=1)
+            st.number_input("ID склада", key="warehouse_id", 
+                          value=st.session_state.config.warehouse_id, step=1)
+            st.checkbox("Автообновление", key="yandex_auto_update",
+                       value=st.session_state.config.yandex_auto_update)
+        
+        with settings_tab3:
+            st.text_input("ID таблицы", key="google_sheet_id", 
+                         value=st.session_state.config.google_sheet_id)
+            st.text_input("Название листа", key="google_sheet_name", 
+                         value=st.session_state.config.google_sheet_name)
+            st.checkbox("Использовать публичный доступ", key="use_public_access",
+                       value=st.session_state.config.use_public_access)
+            
+            if os.path.exists(st.session_state.config.google_credentials_json):
+                st.success(f"✅ Файл ключей найден")
+            else:
+                st.warning(f"⚠️ Файл ключей не найден")
+        
+        with settings_tab4:
+            st.number_input("Наценка (%)", key="markup_percent", 
+                          value=st.session_state.config.markup_percent, step=0.5)
+            st.number_input("Мин. остаток", key="min_stock_threshold", 
+                          value=st.session_state.config.min_stock_threshold, step=1)
+            st.number_input("Товаров в запросе", key="max_offers_per_request", 
+                          value=st.session_state.config.max_offers_per_request, step=50)
+            st.number_input("Потоков", key="max_workers", 
+                          value=st.session_state.config.max_workers, step=1)
+        
+        with settings_tab5:
+            notification_config = st.session_state.config.notification_config
+            st.checkbox("Включить уведомления", key="notifications_enabled",
+                       value=notification_config.get('enabled', False))
+            st.checkbox("Email уведомления", key="email_notifications",
+                       value=notification_config.get('email_notifications', False))
+            st.checkbox("Telegram уведомления", key="telegram_enabled",
+                       value=notification_config.get('telegram_enabled', False))
+        
+        if st.button("💾 Сохранить настройки", use_container_width=True, type="primary", key="save_settings_sidebar_btn"):
+            config = st.session_state.config
+            
+            config.imap_server = st.session_state.imap_server
+            config.imap_port = int(st.session_state.imap_port)
+            config.email_user = st.session_state.email_user
+            config.email_pass = st.session_state.email_pass
+            config.email_search_days = int(st.session_state.email_search_days)
+            config.email_max_emails = int(st.session_state.email_max_emails)
+            config.email_mark_as_read = st.session_state.email_mark_as_read
+            
+            config.yandex_token = st.session_state.yandex_token
+            config.campaign_id = int(st.session_state.campaign_id)
+            config.warehouse_id = int(st.session_state.warehouse_id)
+            config.yandex_auto_update = st.session_state.yandex_auto_update
+            
+            config.google_sheet_id = st.session_state.google_sheet_id
+            config.google_sheet_name = st.session_state.google_sheet_name
+            config.use_public_access = st.session_state.use_public_access
+            
+            config.markup_percent = float(st.session_state.markup_percent)
+            config.min_stock_threshold = int(st.session_state.min_stock_threshold)
+            config.max_offers_per_request = int(st.session_state.max_offers_per_request)
+            config.max_workers = int(st.session_state.max_workers)
+            
+            config.notification_config = {
+                'enabled': st.session_state.notifications_enabled,
+                'email_notifications': st.session_state.email_notifications,
+                'telegram_enabled': st.session_state.telegram_enabled
+            }
+            
+            save_config()
+            st.rerun()
+        
+        st.divider()
+        
+        if st.session_state.is_running:
+            st.warning("🔄 Робот выполняется...")
+            st.progress(st.session_state.progress_value / 100)
+            st.info(f"📌 {st.session_state.progress_message}")
+            
+            if st.button("⏹️ Остановить", use_container_width=True, key="stop_robot_btn"):
+                st.session_state.is_running = False
+                st.rerun()
         else:
-            robot = PriceRobot(st.session_state.config, st.session_state.logger)
-            cleaned = robot.cleanup_temp_files()
-            st.success(f"Очищено {cleaned} файлов")
-    
-    if st.button("💿 Создать бэкап БД", use_container_width=True, key="backup_db_btn"):
-        if st.session_state.robot:
-            backup_path = st.session_state.robot.backup_database()
-        else:
-            robot = PriceRobot(st.session_state.config, st.session_state.logger)
-            backup_path = robot.backup_database()
-        st.success(f"Бэкап создан: {backup_path}")
-    
-    if st.button("🔄 Обновить данные из Sheets", use_container_width=True, key="refresh_sheets_btn"):
-        if st.session_state.product_db:
-            st.session_state.product_db.refresh_data()
-            st.success("Данные обновлены")
+            if st.button("🚀 Запустить робота", use_container_width=True, type="primary", key="start_robot_btn"):
+                run_robot()
+                st.rerun()
+        
+        with st.expander("🔧 Системные действия"):
+            if st.button("🧹 Очистить временные файлы", use_container_width=True, key="cleanup_temp_btn"):
+                if st.session_state.robot:
+                    cleaned = st.session_state.robot.cleanup_temp_files()
+                    st.success(f"Очищено {cleaned} файлов")
+                else:
+                    robot = PriceRobot(st.session_state.config, st.session_state.logger)
+                    cleaned = robot.cleanup_temp_files()
+                    st.success(f"Очищено {cleaned} файлов")
+            
+            if st.button("💿 Создать бэкап БД", use_container_width=True, key="backup_db_btn"):
+                if st.session_state.robot:
+                    backup_path = st.session_state.robot.backup_database()
+                else:
+                    robot = PriceRobot(st.session_state.config, st.session_state.logger)
+                    backup_path = robot.backup_database()
+                st.success(f"Бэкап создан: {backup_path}")
+            
+            if st.button("🔄 Обновить данные из Sheets", use_container_width=True, key="refresh_sheets_btn"):
+                if st.session_state.product_db:
+                    st.session_state.product_db.refresh_data()
+                    st.success("Данные обновлены")
 
 
 def render_main_content() -> None:
-"""Основное содержимое страницы"""
-st.markdown("""
-<style>
-.main-header {
-    font-size: 2.5rem;
-    font-weight: bold;
-    background: linear-gradient(90deg, #1f77b4, #2ca02c);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 1rem;
-}
-.stButton > button {
-    border-radius: 8px;
-    font-weight: bold;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown('<div class="main-header">🤖 Робот для загрузки и анализа прайсов v13.0</div>', 
-       unsafe_allow_html=True)
-
-if st.session_state.result:
-result = st.session_state.result
-
-status_emoji = {
-    'success': '✅',
-    'no_files': 'ℹ️',
-    'partial_success': '⚠️',
-    'failed': '❌',
-    'critical_failed': '💥'
-}
-
-emoji = status_emoji.get(result['status'], '❓')
-
-if result['status'] == 'success':
-    st.success(f"{emoji} Робот успешно выполнил задачу!")
-elif result['status'] == 'no_files':
-    st.info(f"{emoji} Новых файлов не найдено")
-elif result['status'] == 'partial_success':
-    st.warning(f"{emoji} Робот выполнен с предупреждениями")
-else:
-    st.error(f"{emoji} Робот выполнен с ошибками")
-
-cols = st.columns(8)
-metrics = [
-    ("📁 Файлов", result.get('files_processed', 0)),
-    ("⏭️ Пропущено", result.get('files_skipped', 0)),
-    ("❌ С ошибками", result.get('files_with_errors', 0)),
-    ("🔄 Обновлено", result.get('products_updated', 0)),
-    ("➕ Добавлено", result.get('products_added', 0)),
-    ("📦 Отправлено", result.get('offers_sent', 0)),
-    ("⏱️ Время", f"{result.get('duration', 0):.1f}с"),
-    ("❌ Ошибок", len(result.get('errors', [])))
-]
-
-for col, (label, value) in zip(cols, metrics):
-    with col:
-        st.metric(label, value)
-
-if result.get('errors'):
-    with st.expander(f"❌ Ошибки ({len(result['errors'])})", expanded=len(result['errors']) > 0):
-        for error in result['errors']:
-            st.error(f"• {error}")
-
-if result.get('warnings'):
-    with st.expander(f"⚠️ Предупреждения ({len(result['warnings'])})"):
-        for warning in result['warnings']:
-            st.warning(f"• {warning}")
-
-# ОСНОВНЫЕ ВКЛАДКИ
-main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6, main_tab7 = st.tabs([
-"📊 Панель управления",
-"🎓 Обучение прайса",
-"📊 Аналитика прайсов",
-"📋 Поставщики",
-"📦 База товаров",
-"📊 Google Sheets",
-"📝 Логи"
-])
-
-with main_tab1:
-render_dashboard()
-
-with main_tab2:
-render_price_learning_ui()
-
-with main_tab3:
-render_analysis_tab()
-
-with main_tab4:
-render_supplier_settings(prefix="main")
-
-with main_tab5:
-render_products_tab()
-
-with main_tab6:
-render_gs_instructions()
-render_gs_setup_ui()
-
-with main_tab7:
-render_logs_tab()
+    """Основное содержимое страницы"""
+    st.markdown("""
+        <style>
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: linear-gradient(90deg, #1f77b4, #2ca02c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+        .stButton > button {
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="main-header">🤖 Робот для загрузки и анализа прайсов v13.0</div>', 
+               unsafe_allow_html=True)
+    
+    if st.session_state.result:
+        result = st.session_state.result
+        
+        status_emoji = {
+            'success': '✅',
+            'no_files': 'ℹ️',
+            'partial_success': '⚠️',
+            'failed': '❌',
+            'critical_failed': '💥'
+        }
+        
+        emoji = status_emoji.get(result['status'], '❓')
+        
+        if result['status'] == 'success':
+            st.success(f"{emoji} Робот успешно выполнил задачу!")
+        elif result['status'] == 'no_files':
+            st.info(f"{emoji} Новых файлов не найдено")
+        elif result['status'] == 'partial_success':
+            st.warning(f"{emoji} Робот выполнен с предупреждениями")
+        else:
+            st.error(f"{emoji} Робот выполнен с ошибками")
+        
+        cols = st.columns(8)
+        metrics = [
+            ("📁 Файлов", result.get('files_processed', 0)),
+            ("⏭️ Пропущено", result.get('files_skipped', 0)),
+            ("❌ С ошибками", result.get('files_with_errors', 0)),
+            ("🔄 Обновлено", result.get('products_updated', 0)),
+            ("➕ Добавлено", result.get('products_added', 0)),
+            ("📦 Отправлено", result.get('offers_sent', 0)),
+            ("⏱️ Время", f"{result.get('duration', 0):.1f}с"),
+            ("❌ Ошибок", len(result.get('errors', [])))
+        ]
+        
+        for col, (label, value) in zip(cols, metrics):
+            with col:
+                st.metric(label, value)
+        
+        if result.get('errors'):
+            with st.expander(f"❌ Ошибки ({len(result['errors'])})", expanded=len(result['errors']) > 0):
+                for error in result['errors']:
+                    st.error(f"• {error}")
+        
+        if result.get('warnings'):
+            with st.expander(f"⚠️ Предупреждения ({len(result['warnings'])})"):
+                for warning in result['warnings']:
+                    st.warning(f"• {warning}")
+    
+    # ОСНОВНЫЕ ВКЛАДКИ
+    main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6, main_tab7 = st.tabs([
+        "📊 Панель управления",
+        "🎓 Обучение прайса",
+        "📊 Аналитика прайсов",
+        "📋 Поставщики",
+        "📦 База товаров",
+        "📊 Google Sheets",
+        "📝 Логи"
+    ])
+    
+    with main_tab1:
+        render_dashboard()
+    
+    with main_tab2:
+        render_price_learning_ui()
+    
+    with main_tab3:
+        render_analysis_tab()
+    
+    with main_tab4:
+        render_supplier_settings(prefix="main")
+    
+    with main_tab5:
+        render_products_tab()
+    
+    with main_tab6:
+        render_gs_instructions()
+        render_gs_setup_ui()
+    
+    with main_tab7:
+        render_logs_tab()
 
 
 def save_config() -> None:
-"""Сохранение конфигурации"""
-try:
-st.session_state.config.save()
-st.success("✅ Конфигурация сохранена")
-except Exception as e:
-st.error(f"❌ Ошибка сохранения: {e}")
+    """Сохранение конфигурации"""
+    try:
+        st.session_state.config.save()
+        st.success("✅ Конфигурация сохранена")
+    except Exception as e:
+        st.error(f"❌ Ошибка сохранения: {e}")
 
 
 def run_robot() -> None:
-"""Запуск робота"""
-if st.session_state.is_running:
-st.warning("⚠️ Робот уже запущен")
-return
-
-config = st.session_state.config
-
-if not config.email_user or not config.email_pass:
-st.error("❌ Заполните настройки почты")
-return
-
-if not config.yandex_token or config.campaign_id == 0:
-st.warning("⚠️ Не заполнены настройки Яндекс Маркета (будет пропущена отправка)")
-
-st.session_state.robot = PriceRobot(config, st.session_state.logger)
-st.session_state.is_running = True
-st.session_state.result = None
-st.session_state.progress_value = 0
-st.session_state.logger.clear()
-
-def run_thread() -> None:
-"""Фоновый поток выполнения"""
-try:
-    result = st.session_state.robot.run_full_cycle(
-        progress_callback=lambda msg: update_progress(msg)
-    )
-    st.session_state.result = result
-except Exception as e:
-    st.session_state.logger.error(f"Ошибка в потоке: {str(e)}")
-    st.session_state.result = {
-        'status': 'failed',
-        'errors': [str(e)],
-        'files_found': 0,
-        'files_processed': 0,
-        'products_updated': 0,
-        'products_added': 0,
-        'offers_sent': 0,
-        'duration': 0
-    }
-finally:
-    st.session_state.is_running = False
-    st.session_state.progress_value = 100
-
-def update_progress(msg: str) -> None:
-"""Обновление прогресса"""
-st.session_state.progress_message = msg
-if st.session_state.progress_value < 90:
-    st.session_state.progress_value += 5
-
-thread = threading.Thread(target=run_thread, daemon=True)
-thread.start()
+    """Запуск робота"""
+    if st.session_state.is_running:
+        st.warning("⚠️ Робот уже запущен")
+        return
+    
+    config = st.session_state.config
+    
+    if not config.email_user or not config.email_pass:
+        st.error("❌ Заполните настройки почты")
+        return
+    
+    if not config.yandex_token or config.campaign_id == 0:
+        st.warning("⚠️ Не заполнены настройки Яндекс Маркета (будет пропущена отправка)")
+    
+    st.session_state.robot = PriceRobot(config, st.session_state.logger)
+    st.session_state.is_running = True
+    st.session_state.result = None
+    st.session_state.progress_value = 0
+    st.session_state.logger.clear()
+    
+    def run_thread() -> None:
+        """Фоновый поток выполнения"""
+        try:
+            result = st.session_state.robot.run_full_cycle(
+                progress_callback=lambda msg: update_progress(msg)
+            )
+            st.session_state.result = result
+        except Exception as e:
+            st.session_state.logger.error(f"Ошибка в потоке: {str(e)}")
+            st.session_state.result = {
+                'status': 'failed',
+                'errors': [str(e)],
+                'files_found': 0,
+                'files_processed': 0,
+                'products_updated': 0,
+                'products_added': 0,
+                'offers_sent': 0,
+                'duration': 0
+            }
+        finally:
+            st.session_state.is_running = False
+            st.session_state.progress_value = 100
+    
+    def update_progress(msg: str) -> None:
+        """Обновление прогресса"""
+        st.session_state.progress_message = msg
+        if st.session_state.progress_value < 90:
+            st.session_state.progress_value += 5
+    
+    thread = threading.Thread(target=run_thread, daemon=True)
+    thread.start()
 
 
 def run_analysis() -> None:
-"""Запуск анализа прайсов"""
-try:
-config = st.session_state.config
-logger = st.session_state.logger
+    """Запуск анализа прайсов"""
+    try:
+        config = st.session_state.config
+        logger = st.session_state.logger
+        
+        with st.spinner("Загрузка прайсов от поставщиков..."):
+            downloader = MultiSupplierDownloader(config, logger)
+            downloaded_files = downloader.download_all_suppliers()
+        
+        if not downloaded_files:
+            st.warning("⚠️ Не удалось загрузить ни одного прайса")
+            return
+        
+        with st.spinner("Парсинг файлов..."):
+            parser = PriceParser(config, logger)
+            parsed_files = {}
+            
+            for file_data in downloaded_files:
+                try:
+                    filename = file_data.get('filename', 'unknown')
+                    content = file_data.get('content', b'')
+                    supplier_name = file_data.get('supplier', 'Unknown')
+                    
+                    if not content:
+                        continue
+                    
+                    mapping = config.get_supplier_mapping(supplier_name)
+                    
+                    if mapping and any(mapping.values()):
+                        df = parser.parse(filename, content, mapping)
+                    else:
+                        df = parser.parse(filename, content)
+                    
+                    if not df.empty:
+                        df['supplier'] = supplier_name
+                        df['supplier_email'] = file_data.get('supplier_email', '')
+                        df['source_file'] = filename
+                        parsed_files[filename] = df
+                        
+                except Exception as e:
+                    logger.error(f"Ошибка парсинга {file_data.get('filename', 'unknown')}: {e}")
+        
+        if not parsed_files:
+            st.warning("⚠️ Не удалось распарсить ни одного файла")
+            return
+        
+        with st.spinner("Анализ цен..."):
+            analyzer = PriceAnalyzer(config, logger)
+            st.session_state.analyzer = analyzer
+            result_df = analyzer.analyze(parsed_files)
+        
+        if result_df.empty:
+            st.warning("⚠️ Анализ не дал результатов")
+            return
+        
+        st.session_state.analysis_result = result_df
+        
+        supplier_count = len(set(f.get('supplier', 'Unknown') for f in downloaded_files))
+        total_products = sum(len(df) for df in parsed_files.values())
+        unique_skus = len(result_df)
+        
+        st.success(
+            f"✅ Анализ завершен! Найдено {unique_skus} уникальных товаров "
+            f"от {supplier_count} поставщиков"
+        )
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"❌ Ошибка анализа: {str(e)}")
+        st.session_state.logger.error(f"Ошибка анализа: {e}")
 
-with st.spinner("Загрузка прайсов от поставщиков..."):
-    downloader = MultiSupplierDownloader(config, logger)
-    downloaded_files = downloader.download_all_suppliers()
 
-if not downloaded_files:
-    st.warning("⚠️ Не удалось загрузить ни одного прайса")
-    return
-
-with st.spinner("Парсинг файлов..."):
-    parser = PriceParser(config, logger)
-    parsed_files = {}
+def render_price_learning_ui() -> None:
+    """
+    Полноценный интерфейс для загрузки прайса и обучения системы.
+    Пользователь загружает файл, система показывает структуру,
+    пользователь указывает соответствие колонок, система запоминает.
+    """
+    st.subheader("🎓 ОБУЧЕНИЕ СИСТЕМЫ – ЗАГРУЗКА И НАСТРОЙКА ПРАЙСА")
+    st.markdown("""
+    **📥 ЗАГРУЗИТЕ ПРАЙС И НАСТРОЙТЕ КОЛОНКИ ОДИН РАЗ**
     
-    for file_data in downloaded_files:
+    Система запомнит ваши настройки и будет автоматически применять их 
+    при загрузке следующих прайсов от этого поставщика.
+    
+    **Поддерживаемые форматы:** XLSX, XLS, CSV, XML, JSON, TXT, ODS, XLSM, XLSB
+    **Максимальный размер:** 100 MB
+    """)
+    
+    # Проверка наличия поставщиков
+    suppliers = st.session_state.config.suppliers
+    supplier_names = [s.get('name', 'Unknown') for s in suppliers]
+    
+    if not supplier_names:
+        st.warning("⚠️ У вас нет поставщиков. Сначала создайте поставщика в разделе 'Поставщики'.")
+        
+        with st.expander("➕ БЫСТРОЕ СОЗДАНИЕ ПОСТАВЩИКА", expanded=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_name = st.text_input("Название поставщика*", key="learning_supplier_name")
+                new_email = st.text_input("Email*", key="learning_supplier_email")
+                new_password = st.text_input("Пароль*", type="password", key="learning_supplier_password")
+            
+            with col2:
+                new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key="learning_supplier_imap")
+                new_port = st.number_input("IMAP порт", value=993, step=1, key="learning_supplier_port")
+                new_enabled = st.checkbox("Активен", value=True, key="learning_supplier_enabled")
+            
+            if st.button("✅ Создать поставщика", type="primary", use_container_width=True, key="learning_create_supplier_btn"):
+                if not new_name or not new_email or not new_password:
+                    st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
+                else:
+                    new_supplier = SupplierConfig(
+                        name=new_name,
+                        email=new_email,
+                        email_password=new_password,
+                        imap_server=new_imap,
+                        imap_port=new_port,
+                        enabled=new_enabled
+                    )
+                    st.session_state.config.suppliers.append(new_supplier.to_dict())
+                    st.session_state.config._save_suppliers()
+                    st.success(f"✅ Поставщик '{new_name}' создан!")
+                    st.balloons()
+                    time.sleep(1)
+                    st.rerun()
+        
+        st.info("💡 После создания поставщика обновите страницу и загрузите прайс для обучения.")
+        return
+    
+    # Основной интерфейс обучения
+    st.divider()
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        selected_supplier = st.selectbox(
+            "👤 Выберите поставщика для обучения",
+            supplier_names,
+            key="learning_supplier_select"
+        )
+    
+    with col2:
+        supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
+        has_mapping = supplier_config and any(supplier_config.column_mapping.values())
+        
+        if has_mapping:
+            st.success("✅ Маппинг уже настроен")
+            if st.button("🔄 Обновить маппинг", use_container_width=True, key="learning_update_mapping_btn"):
+                st.session_state.learning_force_update = True
+        else:
+            st.warning("⚠️ Маппинг не настроен")
+    
+    st.divider()
+    
+    # Состояние загрузки файла
+    if 'learning_file_loaded' not in st.session_state:
+        st.session_state.learning_file_loaded = False
+        st.session_state.learning_file_content = None
+        st.session_state.learning_file_filename = None
+        st.session_state.learning_df = None
+        st.session_state.learning_columns = None
+        st.session_state.learning_metadata = None
+        st.session_state.learning_force_update = False
+    
+    # Загрузка файла
+    uploaded_file = st.file_uploader(
+        "📤 ЗАГРУЗИТЕ ФАЙЛ ПРАЙСА ДЛЯ ОБУЧЕНИЯ",
+        type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
+        help="Выберите файл прайса от поставщика для настройки соответствия колонок",
+        key="learning_file_uploader"
+    )
+    
+    if uploaded_file is not None:
         try:
-            filename = file_data.get('filename', 'unknown')
-            content = file_data.get('content', b'')
-            supplier_name = file_data.get('supplier', 'Unknown')
+            file_content = uploaded_file.read()
+            file_filename = uploaded_file.name
             
-            if not content:
-                continue
+            # Проверка размера
+            if len(file_content) > 100 * 1024 * 1024:
+                st.error(f"❌ Файл слишком большой ({len(file_content) / 1024 / 1024:.1f} MB). Максимальный размер 100 MB.")
+                st.stop()
             
-            mapping = config.get_supplier_mapping(supplier_name)
+            # Сохранение файла
+            parser = PriceParser(st.session_state.config, st.session_state.logger)
             
-            if mapping and any(mapping.values()):
-                df = parser.parse(filename, content, mapping)
-            else:
-                df = parser.parse(filename, content)
-            
-            if not df.empty:
-                df['supplier'] = supplier_name
-                df['supplier_email'] = file_data.get('supplier_email', '')
-                df['source_file'] = filename
-                parsed_files[filename] = df
+            with st.spinner("🔍 Анализ файла..."):
+                df = parser.parse(file_filename, file_content)
+                
+                if df.empty:
+                    st.error("❌ Файл пуст или не содержит данных")
+                    st.stop()
+                
+                # Получение метаданных
+                file_info = parser.get_file_info(file_content, file_filename)
+                metadata = {
+                    'file_info': file_info,
+                    'row_count': len(df),
+                    'column_count': len(df.columns),
+                    'columns': df.columns.tolist(),
+                    'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},
+                    'encoding': file_info.get('encoding', 'unknown'),
+                    'file_size_formatted': f"{file_info.get('size', 0) / 1024:.1f} KB"
+                }
+                
+                # Сохранение в сессию
+                st.session_state.learning_file_loaded = True
+                st.session_state.learning_file_content = file_content
+                st.session_state.learning_file_filename = file_filename
+                st.session_state.learning_df = df
+                st.session_state.learning_columns = df.columns.tolist()
+                st.session_state.learning_metadata = metadata
+                
+                st.success(f"✅ Файл успешно загружен: {file_filename}")
+                st.balloons()
                 
         except Exception as e:
-            logger.error(f"Ошибка парсинга {file_data.get('filename', 'unknown')}: {e}")
-
-if not parsed_files:
-    st.warning("⚠️ Не удалось распарсить ни одного файла")
-    return
-
-with st.spinner("Анализ цен..."):
-    analyzer = PriceAnalyzer(config, logger)
-    st.session_state.analyzer = analyzer
-    result_df = analyzer.analyze(parsed_files)
-
-if result_df.empty:
-    st.warning("⚠️ Анализ не дал результатов")
-    return
-
-st.session_state.analysis_result = result_df
-
-supplier_count = len(set(f.get('supplier', 'Unknown') for f in downloaded_files))
-total_products = sum(len(df) for df in parsed_files.values())
-unique_skus = len(result_df)
-
-st.success(
-    f"✅ Анализ завершен! Найдено {unique_skus} уникальных товаров "
-    f"от {supplier_count} поставщиков"
-)
-st.rerun()
-
-except Exception as e:
-st.error(f"❌ Ошибка анализа: {str(e)}")
-st.session_state.logger.error(f"Ошибка анализа: {e}")
+            st.error(f"❌ Ошибка загрузки файла: {str(e)}")
+            st.exception(e)
+            st.session_state.learning_file_loaded = False
+    
+    # Если файл загружен – показываем интерфейс настройки
+    if st.session_state.learning_file_loaded and st.session_state.learning_df is not None:
+        df = st.session_state.learning_df
+        columns = st.session_state.learning_columns
+        metadata = st.session_state.learning_metadata
+        file_filename = st.session_state.learning_file_filename
+        
+        st.divider()
+        st.subheader("📊 ИНФОРМАЦИЯ О ФАЙЛЕ")
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("📄 Строк", metadata.get('row_count', 0))
+        with col2:
+            st.metric("📊 Колонок", metadata.get('column_count', 0))
+        with col3:
+            st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
+        with col4:
+            st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
+        with col5:
+            st.metric("📁 Формат", metadata.get('file_info', {}).get('format', 'unknown'))
+        
+        st.divider()
+        
+        # Предпросмотр данных
+        st.subheader("📋 ПРЕДПРОСМОТР ДАННЫХ")
+        
+        preview_rows = st.slider(
+            "Количество строк для предпросмотра",
+            min_value=5,
+            max_value=100,
+            value=20,
+            step=5,
+            key="learning_preview_rows"
+        )
+        
+        st.dataframe(
+            df.head(preview_rows),
+            use_container_width=True,
+            height=400
+        )
+        
+        # Статистика по колонкам
+        with st.expander("📊 СТАТИСТИКА ПО КОЛОНКАМ", expanded=False):
+            col_stats = []
+            for col in df.columns:
+                col_data = df[col]
+                col_stats.append({
+                    'Колонка': col,
+                    'Тип': str(col_data.dtype),
+                    'Непустых': len(df) - col_data.isna().sum(),
+                    'Пустых': col_data.isna().sum(),
+                    'Уникальных': col_data.nunique(),
+                    'Примеры': ', '.join([str(x) for x in col_data.dropna().head(3).tolist()])
+                })
+            st.dataframe(
+                pd.DataFrame(col_stats),
+                use_container_width=True,
+                hide_index=True
+            )
+        
+        st.divider()
+        
+        # ===================================================================
+        # ИНТЕРФЕЙС НАСТРОЙКИ КОЛОНОК
+        # ===================================================================
+        
+        st.subheader("🎯 НАСТРОЙКА СООТВЕТСТВИЯ КОЛОНОК")
+        st.markdown("""
+        **Укажите, какая колонка в загруженном файле соответствует каждому полю.**
+        
+        **Обязательные поля** (отмечены *):
+        - **Артикул (SKU)** – уникальный идентификатор товара
+        - **Цена** – цена товара
+        
+        **Рекомендуемые поля:**
+        - Остаток, Бренд, Название, Категория
+        """)
+        
+        # Получаем текущий маппинг поставщика
+        supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
+        current_mapping = supplier_config.column_mapping if supplier_config else {}
+        
+        # Поля для настройки с подсказками
+        field_definitions = {
+            'sku': {'label': '📌 Артикул (SKU) *', 'help': 'Уникальный идентификатор товара', 'required': True},
+            'price': {'label': '💰 Цена *', 'help': 'Цена товара', 'required': True},
+            'stock': {'label': '📦 Остаток', 'help': 'Количество товара на складе', 'required': False},
+            'brand': {'label': '🏷️ Бренд', 'help': 'Производитель или бренд товара', 'required': False},
+            'name': {'label': '📝 Название', 'help': 'Наименование товара', 'required': False},
+            'category': {'label': '📂 Категория', 'help': 'Категория или раздел товара', 'required': False},
+            'description': {'label': '📄 Описание', 'help': 'Описание товара', 'required': False},
+            'weight': {'label': '⚖️ Вес', 'help': 'Вес товара', 'required': False},
+            'barcode': {'label': '🔢 Штрихкод', 'help': 'Штрихкод или EAN товара', 'required': False},
+            'country': {'label': '🌍 Страна', 'help': 'Страна производства', 'required': False},
+            'warranty': {'label': '🛡️ Гарантия', 'help': 'Срок гарантии', 'required': False},
+            'dimensions': {'label': '📐 Размеры', 'help': 'Габариты товара', 'required': False},
+            'currency': {'label': '💱 Валюта', 'help': 'Валюта цены', 'required': False},
+            'vat': {'label': '🧾 НДС', 'help': 'Ставка НДС', 'required': False}
+        }
+        
+        # Создаем список опций для выбора (пустое значение + все колонки)
+        col_options = [''] + columns
+        
+        # Функция для определения индекса по умолчанию
+        def get_default_index(field_name: str) -> int:
+            # Проверяем сохранённый маппинг
+            if current_mapping and field_name in current_mapping:
+                col_name = current_mapping[field_name]
+                if col_name in col_options:
+                    return col_options.index(col_name)
+            
+            # Автоопределение по названию колонки
+            for idx, col in enumerate(col_options):
+                if col:
+                    col_lower = col.lower()
+                    field_lower = field_name.lower()
+                    # Проверяем частичное совпадение
+                    if field_lower in col_lower or col_lower in field_lower:
+                        return idx
+                    # Проверяем синонимы
+                    synonyms = {
+                        'sku': ['артикул', 'код', 'id', 'номер', 'article', 'art'],
+                        'price': ['цена', 'cost', 'прайс', 'стоимость'],
+                        'stock': ['остаток', 'количество', 'кол-во', 'наличие', 'quantity'],
+                        'brand': ['бренд', 'производитель', 'manufacturer', 'vendor'],
+                        'name': ['название', 'наименование', 'product', 'title'],
+                        'category': ['категория', 'раздел', 'группа', 'section'],
+                        'description': ['описание', 'desc', 'характеристики'],
+                        'weight': ['вес', 'масса', 'weight', 'mass'],
+                        'barcode': ['штрихкод', 'ean', 'upc', 'баркод'],
+                        'country': ['страна', 'производство', 'origin', 'country'],
+                        'warranty': ['гарантия', 'guarantee', 'warranty'],
+                        'dimensions': ['размеры', 'габариты', 'dimensions', 'size'],
+                        'currency': ['валюта', 'currency', 'valuta'],
+                        'vat': ['ндс', 'vat', 'ставка']
+                    }
+                    if field_name in synonyms:
+                        for syn in synonyms[field_name]:
+                            if syn in col_lower:
+                                return idx
+            return 0
+        
+        # Отображаем поля в две колонки
+        col1, col2 = st.columns(2)
+        
+        mapping = {}
+        field_errors = []
+        
+        # Группируем поля для отображения
+        field_items = list(field_definitions.items())
+        
+        for i, (field_name, field_info) in enumerate(field_items):
+            with col1 if i % 2 == 0 else col2:
+                default_idx = get_default_index(field_name)
+                
+                # Добавляем звёздочку для обязательных полей
+                label = field_info['label']
+                if field_info['required']:
+                    label = f"**{label}**"
+                
+                selected_col = st.selectbox(
+                    label,
+                    options=col_options,
+                    index=default_idx,
+                    help=field_info['help'],
+                    key=f"learning_{field_name}_{selected_supplier}"
+                )
+                
+                if selected_col:
+                    mapping[field_name] = selected_col
+                else:
+                    mapping[field_name] = ''
+                
+                # Проверка обязательных полей
+                if field_info['required'] and not selected_col:
+                    field_errors.append(f"Поле '{field_info['label']}' обязательно для заполнения")
+        
+        st.divider()
+        
+        # ===================================================================
+        # ПРЕДПРОСМОТР РЕЗУЛЬТАТА
+        # ===================================================================
+        
+        st.subheader("🔍 ПРЕДПРОСМОТР РЕЗУЛЬТАТА МАППИНГА")
+        
+        if not mapping.get('sku') or not mapping.get('price'):
+            st.warning("⚠️ **Обязательные поля не заполнены!**")
+            st.warning("Заполните Артикул (SKU) и Цену для продолжения.")
+        else:
+            # Применяем маппинг
+            parser = PriceParser(st.session_state.config, st.session_state.logger)
+            try:
+                result_df = parser._apply_mapping(df.copy(), mapping)
+                
+                if not result_df.empty:
+                    # Показываем статистику
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("📦 Всего товаров", len(result_df))
+                    with col2:
+                        valid_prices = (result_df['price'] > 0).sum() if 'price' in result_df.columns else 0
+                        st.metric("💰 С ценой", valid_prices)
+                    with col3:
+                        with_stock = (result_df['stock'] > 0).sum() if 'stock' in result_df.columns else 0
+                        st.metric("📦 В наличии", with_stock)
+                    with col4:
+                        unique_skus = result_df['sku'].nunique() if 'sku' in result_df.columns else 0
+                        st.metric("🔑 Уникальных SKU", unique_skus)
+                    
+                    # Показываем таблицу с результатом
+                    st.dataframe(
+                        result_df.head(20),
+                        use_container_width=True,
+                        height=300,
+                        column_config={
+                            "sku": "Артикул",
+                            "price": st.column_config.NumberColumn("Цена", format="%.2f"),
+                            "stock": "Остаток",
+                            "brand": "Бренд",
+                            "name": "Название",
+                            "category": "Категория",
+                            "description": "Описание"
+                        }
+                    )
+                    
+                    # Валидация результата
+                    validation = parser.validate_data(result_df)
+                    
+                    if not validation.is_valid:
+                        st.warning("⚠️ **Обнаружены проблемы с данными:**")
+                        for error in validation.errors[:5]:
+                            st.error(f"• {error}")
+                        for warning in validation.warnings[:5]:
+                            st.warning(f"• {warning}")
+                    else:
+                        if validation.statistics:
+                            st.success("✅ Данные прошли валидацию!")
+                            
+                            # Дополнительная статистика
+                            if 'price_range' in validation.statistics:
+                                price_range = validation.statistics['price_range']
+                                st.info(f"💰 Диапазон цен: от {price_range['min']:.2f} до {price_range['max']:.2f}, средняя: {price_range['mean']:.2f}")
+                            
+                            if 'stock_stats' in validation.statistics:
+                                stock_stats = validation.statistics['stock_stats']
+                                st.info(f"📦 Общий остаток: {stock_stats['total']}, товаров в наличии: {stock_stats['with_stock']}")
+                else:
+                    st.error("❌ После применения маппинга не осталось данных")
+                    
+            except Exception as e:
+                st.error(f"❌ Ошибка применения маппинга: {str(e)}")
+        
+        st.divider()
+        
+        # ===================================================================
+        # СОХРАНЕНИЕ МАППИНГА
+        # ===================================================================
+        
+        st.subheader("💾 СОХРАНЕНИЕ НАСТРОЕК")
+        
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            save_comment = st.text_input(
+                "📝 Комментарий к сохранению",
+                placeholder="Например: Настройка для нового прайса от 01.01.2024",
+                key="learning_save_comment"
+            )
+        
+        with col2:
+            if st.button("💾 СОХРАНИТЬ МАППИНГ", type="primary", use_container_width=True, key="learning_save_mapping_btn"):
+                if not mapping.get('sku') or not mapping.get('price'):
+                    st.error("❌ Нельзя сохранить маппинг без заполнения обязательных полей (SKU и Цена)")
+                else:
+                    # Создаем или обновляем поставщика
+                    supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
+                    if supplier_config:
+                        supplier_config.column_mapping = {k: v for k, v in mapping.items() if v}
+                        # Обновляем в списке поставщиков
+                        for i, s in enumerate(st.session_state.config.suppliers):
+                            if s.get('name') == selected_supplier:
+                                st.session_state.config.suppliers[i] = supplier_config.to_dict()
+                                break
+                        st.session_state.config._save_suppliers()
+                        
+                        st.success(f"✅ Маппинг успешно сохранён для поставщика **{selected_supplier}**!")
+                        st.balloons()
+                        
+                        # Показываем сохранённый маппинг
+                        saved_mapping = supplier_config.column_mapping
+                        if saved_mapping:
+                            st.info("📋 **Сохранённые настройки:**")
+                            mapping_df = pd.DataFrame([
+                                {'Поле': field, 'Колонка в файле': col}
+                                for field, col in saved_mapping.items()
+                            ])
+                            st.dataframe(mapping_df, use_container_width=True, hide_index=True)
+                        
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Поставщик не найден")
+        
+        with col3:
+            if has_mapping:
+                if st.button("🔄 СБРОСИТЬ МАППИНГ", use_container_width=True, key="learning_reset_mapping_btn"):
+                    if st.session_state.get("learning_confirm_reset", False):
+                        supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
+                        if supplier_config:
+                            supplier_config.column_mapping = {}
+                            for i, s in enumerate(st.session_state.config.suppliers):
+                                if s.get('name') == selected_supplier:
+                                    st.session_state.config.suppliers[i] = supplier_config.to_dict()
+                                    break
+                            st.session_state.config._save_suppliers()
+                            st.success("✅ Маппинг сброшен")
+                            st.session_state.learning_confirm_reset = False
+                            time.sleep(1)
+                            st.rerun()
+                    else:
+                        st.session_state.learning_confirm_reset = True
+                        st.warning("⚠️ Нажмите ещё раз для подтверждения сброса")
+        
+        st.divider()
+        
+        # ===================================================================
+        # ТЕСТИРОВАНИЕ ЗАГРУЗКИ
+        # ===================================================================
+        
+        st.subheader("🧪 ТЕСТИРОВАНИЕ ЗАГРУЗКИ С НАСТРОЕННЫМ МАППИНГОМ")
+        st.markdown("""
+        После сохранения маппинга вы можете протестировать, как система будет обрабатывать 
+        новые прайсы от этого поставщика.
+        """)
+        
+        test_col1, test_col2 = st.columns(2)
+        
+        with test_col1:
+            # Создаем тестовый файл для проверки
+            if st.button("📤 ЗАГРУЗИТЬ ТЕСТОВЫЙ ФАЙЛ", use_container_width=True, key="learning_test_load_btn"):
+                supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
+                if supplier_config and any(supplier_config.column_mapping.values()):
+                    # Используем текущий загруженный файл как тестовый
+                    test_content = st.session_state.learning_file_content
+                    test_filename = st.session_state.learning_file_filename
+                    
+                    if test_content:
+                        with st.spinner("🔄 Тестирование загрузки..."):
+                            parser = PriceParser(st.session_state.config, st.session_state.logger)
+                            test_df = parser.parse(
+                                test_filename,
+                                test_content,
+                                supplier_config.column_mapping,
+                                supplier_config.processing_rules
+                            )
+                            
+                            if not test_df.empty:
+                                st.success(f"✅ Тест успешен! Загружено {len(test_df)} товаров")
+                                
+                                # Показываем результат
+                                st.dataframe(
+                                    test_df.head(10),
+                                    use_container_width=True,
+                                    height=200
+                                )
+                                
+                                # Статистика
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("📦 Товаров", len(test_df))
+                                with col2:
+                                    valid_prices = (test_df['price'] > 0).sum()
+                                    st.metric("💰 С ценой", valid_prices)
+                                with col3:
+                                    with_stock = (test_df['stock'] > 0).sum()
+                                    st.metric("📦 В наличии", with_stock)
+                            else:
+                                st.error("❌ Тест не удался: файл не содержит данных")
+                    else:
+                        st.warning("⚠️ Нет загруженного файла для тестирования")
+                else:
+                    st.warning("⚠️ Сначала сохраните маппинг для этого поставщика")
+        
+        with test_col2:
+            # Опция загрузить другой файл для теста
+            st.markdown("**Или загрузите другой файл для теста:**")
+            test_file = st.file_uploader(
+                "Выберите файл для тестирования",
+                type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt'],
+                key="learning_test_file_uploader"
+            )
+            
+            if test_file is not None:
+                try:
+                    test_content = test_file.read()
+                    test_filename = test_file.name
+                    
+                    supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
+                    if supplier_config and any(supplier_config.column_mapping.values()):
+                        with st.spinner("🔄 Тестирование загрузки..."):
+                            parser = PriceParser(st.session_state.config, st.session_state.logger)
+                            test_df = parser.parse(
+                                test_filename,
+                                test_content,
+                                supplier_config.column_mapping,
+                                supplier_config.processing_rules
+                            )
+                            
+                            if not test_df.empty:
+                                st.success(f"✅ Тест успешен! Загружено {len(test_df)} товаров")
+                                st.dataframe(test_df.head(10), use_container_width=True, height=200)
+                            else:
+                                st.error("❌ Тест не удался: файл пуст")
+                    else:
+                        st.warning("⚠️ Сначала сохраните маппинг для этого поставщика")
+                except Exception as e:
+                    st.error(f"❌ Ошибка тестирования: {str(e)}")
+        
+        st.divider()
+        
+        # ===================================================================
+        # ИСТОРИЯ И СТАТИСТИКА
+        # ===================================================================
+        
+        with st.expander("📜 ИСТОРИЯ И СТАТИСТИКА ОБУЧЕНИЯ", expanded=False):
+            supplier_config = st.session_state.config.get_supplier_by_name(selected_supplier)
+            
+            if supplier_config:
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("📋 Настроено полей", len(supplier_config.column_mapping))
+                
+                with col2:
+                    total_possible = len(field_definitions)
+                    st.metric("📊 Всего полей", total_possible)
+                
+                with col3:
+                    completion = (len(supplier_config.column_mapping) / total_possible * 100) if total_possible > 0 else 0
+                    st.metric("🎯 Заполнено", f"{completion:.1f}%")
+                
+                # Показываем сохранённый маппинг
+                if supplier_config.column_mapping:
+                    st.markdown("**📋 Текущий маппинг:**")
+                    mapping_data = []
+                    for field, col in supplier_config.column_mapping.items():
+                        if col:
+                            field_info = field_definitions.get(field, {})
+                            mapping_data.append({
+                                'Поле': field_info.get('label', field),
+                                'Колонка': col,
+                                'Обязательное': '✅' if field_info.get('required', False) else '❌'
+                            })
+                    st.dataframe(pd.DataFrame(mapping_data), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Маппинг не настроен")
+                
+                # Статистика использования
+                stats = supplier_config.stats
+                if stats:
+                    st.markdown("**📊 Статистика использования:**")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("📁 Обработано файлов", stats.get('total_files_processed', 0))
+                    with col2:
+                        st.metric("📦 Загружено товаров", stats.get('total_products_loaded', 0))
+                    with col3:
+                        success_rate = stats.get('success_rate', 0)
+                        st.metric("✅ Успешность", f"{success_rate:.1f}%")
+    
+    else:
+        # Если файл не загружен – показываем инструкцию
+        st.info("📤 **Загрузите файл прайса для начала обучения**")
+        st.markdown("""
+        ### 📋 ИНСТРУКЦИЯ ПО ОБУЧЕНИЮ:
+        
+        1. **Загрузите файл** прайса от поставщика
+        2. **Проанализируйте структуру** – система покажет колонки и данные
+        3. **Настройте соответствие** – выберите, какая колонка к чему относится
+        4. **Проверьте результат** – система покажет, как будет выглядеть обработанный прайс
+        5. **Сохраните настройки** – система запомнит их для этого поставщика
+        
+        **После сохранения** все следующие прайсы от этого поставщика будут обрабатываться автоматически!
+        """)
+        
+        # Показываем пример
+        with st.expander("ℹ️ ПРИМЕР НАСТРОЙКИ", expanded=False):
+            st.markdown("""
+            ### Пример соответствия колонок:
+            
+            | Поле | Колонка в файле |
+            |------|-----------------|
+            | Артикул (SKU) | `Артикул` или `Код товара` |
+            | Цена | `Цена розничная` или `Price` |
+            | Остаток | `Остаток` или `Кол-во` |
+            | Бренд | `Бренд` или `Производитель` |
+            | Название | `Название` или `Наименование` |
+            | Категория | `Категория` или `Раздел` |
+            
+            **Совет:** Если колонка не подходит – оставьте поле пустым.
+            """)
+    
+    st.divider()
+    
+    # Кнопка для очистки сессии
+    if st.session_state.learning_file_loaded:
+        if st.button("🗑️ ОЧИСТИТЬ ЗАГРУЖЕННЫЙ ФАЙЛ", use_container_width=True, key="learning_clear_file_btn"):
+            st.session_state.learning_file_loaded = False
+            st.session_state.learning_file_content = None
+            st.session_state.learning_file_filename = None
+            st.session_state.learning_df = None
+            st.session_state.learning_columns = None
+            st.session_state.learning_metadata = None
+            st.rerun()
 
 
 # ===================================================================
-# БЛОК 17: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+# БЛОК 16: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
 # ===================================================================
 
 def main() -> None:
-"""Главная функция приложения"""
-try:
-init_session_state()
-
-st.set_page_config(
-    page_title="🤖 Робот для прайсов v13.0",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-render_settings_sidebar()
-render_main_content()
-
-if st.session_state.get('auto_refresh', False):
-    time.sleep(5)
-    st.rerun()
-
-except Exception as e:
-st.error(f"❌ Критическая ошибка в приложении: {e}")
-st.exception(e)
-
-if st.button("🔄 Перезапустить приложение"):
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()
+    """Главная функция приложения"""
+    try:
+        init_session_state()
+        
+        st.set_page_config(
+            page_title="🤖 Робот для прайсов v13.0",
+            page_icon="🤖",
+            layout="wide",
+            initial_sidebar_state="expanded"
+        )
+        
+        render_settings_sidebar()
+        render_main_content()
+        
+        if st.session_state.get('auto_refresh', False):
+            time.sleep(5)
+            st.rerun()
+        
+    except Exception as e:
+        st.error(f"❌ Критическая ошибка в приложении: {e}")
+        st.exception(e)
+        
+        if st.button("🔄 Перезапустить приложение"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
 
 # ===================================================================
-# БЛОК 18: ТОЧКА ВХОДА И ЗАПУСК ИЗ КОМАНДНОЙ СТРОКИ
+# БЛОК 17: ТОЧКА ВХОДА И ЗАПУСК ИЗ КОМАНДНОЙ СТРОКИ
 # ===================================================================
 
 def run_cli():
-"""Запуск из командной строки"""
-parser = argparse.ArgumentParser(description='Робот для загрузки и анализа прайсов')
-
-parser.add_argument('--mode', choices=['run', 'analyze', 'cleanup', 'backup', 'health'],
-               default='run', help='Режим работы')
-
-parser.add_argument('--supplier', type=str, help='Имя поставщика для обработки')
-parser.add_argument('--config', type=str, default='config.json', help='Путь к файлу конфигурации')
-parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-               default='INFO', help='Уровень логирования')
-
-args = parser.parse_args()
-
-config = Config.load()
-logger = StreamlitLogger()
-
-robot = PriceRobot(config, logger)
-
-if args.mode == 'run':
-if args.supplier:
-    result = robot.run_single_supplier(args.supplier)
-else:
-    result = robot.run_full_cycle()
-
-print(f"Статус: {result['status']}")
-print(f"Файлов обработано: {result.get('files_processed', 0)}")
-print(f"Товаров обновлено: {result.get('products_updated', 0)}")
-print(f"Ошибок: {len(result.get('errors', []))}")
-
-elif args.mode == 'analyze':
-df = robot.quick_analysis()
-if not df.empty:
-    filepath = robot.price_analyzer.export_to_excel(df)
-    print(f"Анализ сохранен в: {filepath}")
-else:
-    print("Нет данных для анализа")
-
-elif args.mode == 'cleanup':
-cleaned = robot.cleanup_temp_files()
-print(f"Очищено файлов: {cleaned}")
-
-elif args.mode == 'backup':
-backup_path = robot.backup_database()
-print(f"Бэкап создан: {backup_path}")
-
-elif args.mode == 'health':
-health = robot.get_system_health()
-print(json.dumps(health, indent=2, ensure_ascii=False))
+    """Запуск из командной строки"""
+    parser = argparse.ArgumentParser(description='Робот для загрузки и анализа прайсов')
+    
+    parser.add_argument('--mode', choices=['run', 'analyze', 'cleanup', 'backup', 'health'],
+                       default='run', help='Режим работы')
+    
+    parser.add_argument('--supplier', type=str, help='Имя поставщика для обработки')
+    parser.add_argument('--config', type=str, default='config.json', help='Путь к файлу конфигурации')
+    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                       default='INFO', help='Уровень логирования')
+    
+    args = parser.parse_args()
+    
+    config = Config.load()
+    logger = StreamlitLogger()
+    
+    robot = PriceRobot(config, logger)
+    
+    if args.mode == 'run':
+        if args.supplier:
+            result = robot.run_single_supplier(args.supplier)
+        else:
+            result = robot.run_full_cycle()
+        
+        print(f"Статус: {result['status']}")
+        print(f"Файлов обработано: {result.get('files_processed', 0)}")
+        print(f"Товаров обновлено: {result.get('products_updated', 0)}")
+        print(f"Ошибок: {len(result.get('errors', []))}")
+        
+    elif args.mode == 'analyze':
+        df = robot.quick_analysis()
+        if not df.empty:
+            filepath = robot.price_analyzer.export_to_excel(df)
+            print(f"Анализ сохранен в: {filepath}")
+        else:
+            print("Нет данных для анализа")
+    
+    elif args.mode == 'cleanup':
+        cleaned = robot.cleanup_temp_files()
+        print(f"Очищено файлов: {cleaned}")
+    
+    elif args.mode == 'backup':
+        backup_path = robot.backup_database()
+        print(f"Бэкап создан: {backup_path}")
+    
+    elif args.mode == 'health':
+        health = robot.get_system_health()
+        print(json.dumps(health, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
-if len(sys.argv) > 1:
-run_cli()
-else:
-main()
+    if len(sys.argv) > 1:
+        run_cli()
+    else:
+        main()
