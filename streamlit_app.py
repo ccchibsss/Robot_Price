@@ -6307,7 +6307,7 @@ def render_supplier_settings() -> None:
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.button("🔄 Синхронизировать", key=f"sync_{i}", use_container_width=True):
+                    if st.button("🔄 Синхронизировать", key=f"sync_supplier_{i}", use_container_width=True):
                         robot = PriceRobot(st.session_state.config, st.session_state.logger)
                         result = robot.run_single_supplier(supplier.get('name', ''))
                         if result['status'] == 'success':
@@ -6319,7 +6319,7 @@ def render_supplier_settings() -> None:
                     new_enabled = not supplier.get('enabled', True)
                     if st.button(
                         "🔴 Деактивировать" if supplier.get('enabled', True) else "🟢 Активировать",
-                        key=f"toggle_{i}",
+                        key=f"toggle_supplier_{i}",
                         use_container_width=True
                     ):
                         supplier['enabled'] = new_enabled
@@ -6327,34 +6327,34 @@ def render_supplier_settings() -> None:
                         st.rerun()
                 
                 with col3:
-                    if st.button("🗑️ Удалить", key=f"delete_{i}", use_container_width=True):
-                        if st.session_state.get(f"confirm_delete_{i}", False):
+                    if st.button("🗑️ Удалить", key=f"delete_supplier_{i}", use_container_width=True):
+                        if st.session_state.get(f"confirm_delete_supplier_{i}", False):
                             st.session_state.config.suppliers.pop(i)
                             st.session_state.config._save_suppliers()
                             st.success("✅ Поставщик удален")
                             st.rerun()
                         else:
-                            st.session_state[f"confirm_delete_{i}"] = True
+                            st.session_state[f"confirm_delete_supplier_{i}"] = True
                             st.warning("⚠️ Нажмите еще раз для подтверждения удаления")
     
     with st.expander("➕ Добавить нового поставщика", expanded=not suppliers):
         col1, col2 = st.columns(2)
         
         with col1:
-            new_name = st.text_input("Название поставщика*", key="new_supplier_name")
-            new_email = st.text_input("Email*", key="new_supplier_email")
-            new_password = st.text_input("Пароль*", type="password", key="new_supplier_password")
-            new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key="new_supplier_imap")
-            new_port = st.number_input("IMAP порт", value=993, step=1, key="new_supplier_port")
+            new_name = st.text_input("Название поставщика*", key="new_supplier_name_main")
+            new_email = st.text_input("Email*", key="new_supplier_email_main")
+            new_password = st.text_input("Пароль*", type="password", key="new_supplier_password_main")
+            new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key="new_supplier_imap_main")
+            new_port = st.number_input("IMAP порт", value=993, step=1, key="new_supplier_port_main")
         
         with col2:
-            new_subject = st.text_input("Фильтр по теме", placeholder="прайс", key="new_supplier_subject")
-            new_sender = st.text_input("Фильтр по отправителю", key="new_supplier_sender")
-            new_priority = st.number_input("Приоритет", value=0, step=1, key="new_supplier_priority")
-            new_markup = st.number_input("Индивидуальная наценка (%)", value=0.0, step=0.5, key="new_supplier_markup")
-            new_enabled = st.checkbox("Активен", value=True, key="new_supplier_enabled")
+            new_subject = st.text_input("Фильтр по теме", placeholder="прайс", key="new_supplier_subject_main")
+            new_sender = st.text_input("Фильтр по отправителю", key="new_supplier_sender_main")
+            new_priority = st.number_input("Приоритет", value=0, step=1, key="new_supplier_priority_main")
+            new_markup = st.number_input("Индивидуальная наценка (%)", value=0.0, step=0.5, key="new_supplier_markup_main")
+            new_enabled = st.checkbox("Активен", value=True, key="new_supplier_enabled_main")
         
-        if st.button("✅ Добавить поставщика", type="primary", use_container_width=True):
+        if st.button("✅ Добавить поставщика", type="primary", use_container_width=True, key="add_supplier_main_btn"):
             if not new_name or not new_email or not new_password:
                 st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
             else:
@@ -6380,7 +6380,7 @@ def render_analysis_tab() -> None:
     """Расширенный интерфейс аналитики"""
     st.subheader("📊 Аналитика прайсов поставщиков")
     
-    if st.button("🚀 Запустить анализ", type="primary", use_container_width=True):
+    if st.button("🚀 Запустить анализ", type="primary", use_container_width=True, key="run_analysis_btn"):
         if not st.session_state.config.suppliers:
             st.error("❌ Сначала добавьте поставщиков в настройках")
         else:
@@ -6411,18 +6411,18 @@ def render_analysis_tab() -> None:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            search_query = st.text_input("Поиск по SKU", placeholder="Введите артикул...")
+            search_query = st.text_input("Поиск по SKU", placeholder="Введите артикул...", key="analysis_search_sku")
         
         with col2:
             suppliers_list = ['Все'] + sorted(df['best_supplier'].unique().tolist())
-            selected_supplier = st.selectbox("Поставщик", suppliers_list)
+            selected_supplier = st.selectbox("Поставщик", suppliers_list, key="analysis_select_supplier")
         
         with col3:
             categories = ['Все'] + sorted(df['category'].dropna().unique().tolist())
-            selected_category = st.selectbox("Категория", categories)
+            selected_category = st.selectbox("Категория", categories, key="analysis_select_category")
         
         with col4:
-            min_diff = st.number_input("Мин. разница цен (%)", value=0.0, step=1.0)
+            min_diff = st.number_input("Мин. разница цен (%)", value=0.0, step=1.0, key="analysis_min_diff")
         
         filtered_df = df.copy()
         
@@ -6479,7 +6479,7 @@ def render_analysis_tab() -> None:
                     color='min_price',
                     color_continuous_scale='greens'
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="chart_cheap_products")
             
             with col2:
                 fig = px.histogram(
@@ -6490,7 +6490,7 @@ def render_analysis_tab() -> None:
                     nbins=30,
                     color_discrete_sequence=['blue']
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="chart_price_distribution")
             
             supplier_performance = filtered_df['best_supplier'].value_counts().head(10)
             fig = px.pie(
@@ -6498,7 +6498,7 @@ def render_analysis_tab() -> None:
                 names=supplier_performance.index,
                 title='Доля лучших предложений по поставщикам'
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="chart_supplier_performance")
         
         with tab3:
             if st.session_state.analyzer:
@@ -6541,7 +6541,7 @@ def render_analysis_tab() -> None:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("📥 CSV", use_container_width=True):
+            if st.button("📥 CSV", use_container_width=True, key="export_csv_btn"):
                 if st.session_state.analyzer:
                     filepath = st.session_state.analyzer.export_to_csv(filtered_df)
                     with open(filepath, 'rb') as f:
@@ -6549,11 +6549,12 @@ def render_analysis_tab() -> None:
                             "📥 Скачать CSV",
                             f.read(),
                             os.path.basename(filepath),
-                            "text/csv"
+                            "text/csv",
+                            key="download_csv_btn"
                         )
         
         with col2:
-            if st.button("📥 Excel", use_container_width=True):
+            if st.button("📥 Excel", use_container_width=True, key="export_excel_btn"):
                 if st.session_state.analyzer:
                     filepath = st.session_state.analyzer.export_to_excel(filtered_df)
                     with open(filepath, 'rb') as f:
@@ -6561,11 +6562,12 @@ def render_analysis_tab() -> None:
                             "📥 Скачать Excel",
                             f.read(),
                             os.path.basename(filepath),
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_excel_btn"
                         )
         
         with col3:
-            if st.button("📊 Полный отчет", use_container_width=True):
+            if st.button("📊 Полный отчет", use_container_width=True, key="export_report_btn"):
                 if st.session_state.analyzer:
                     filepath = st.session_state.analyzer.generate_price_report(filtered_df)
                     with open(filepath, 'rb') as f:
@@ -6573,7 +6575,8 @@ def render_analysis_tab() -> None:
                             "📥 Скачать отчет",
                             f.read(),
                             os.path.basename(filepath),
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_report_btn"
                         )
 
 def render_products_tab() -> None:
@@ -6609,7 +6612,8 @@ def render_products_tab() -> None:
                 )
             
             search_query = st.text_input("🔍 Поиск по базе", 
-                                       placeholder="Введите артикул, бренд или название...")
+                                       placeholder="Введите артикул, бренд или название...",
+                                       key="products_search")
             
             if search_query:
                 df = st.session_state.product_db.search_products(search_query)
@@ -6630,14 +6634,15 @@ def render_products_tab() -> None:
                 hide_index=True
             )
             
-            if st.button("📥 Экспортировать базу в Excel"):
+            if st.button("📥 Экспортировать базу в Excel", key="export_products_btn"):
                 filepath = st.session_state.product_db.export_to_excel()
                 with open(filepath, 'rb') as f:
                     st.download_button(
                         "📥 Скачать Excel",
                         f.read(),
                         os.path.basename(filepath),
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="download_products_btn"
                     )
 
 def render_logs_tab() -> None:
@@ -6689,18 +6694,19 @@ def render_logs_tab() -> None:
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("📥 Экспорт логов (JSON)", use_container_width=True):
+        if st.button("📥 Экспорт логов (JSON)", use_container_width=True, key="export_logs_json_btn"):
             filepath = st.session_state.logger.export_logs('json')
             with open(filepath, 'rb') as f:
                 st.download_button(
                     "📥 Скачать JSON",
                     f.read(),
                     os.path.basename(filepath),
-                    "application/json"
+                    "application/json",
+                    key="download_logs_json_btn"
                 )
     
     with col2:
-        if st.button("🔄 Обновить логи", use_container_width=True):
+        if st.button("🔄 Обновить логи", use_container_width=True, key="refresh_logs_btn"):
             st.rerun()
 
 def render_settings_sidebar() -> None:
@@ -6768,7 +6774,7 @@ def render_settings_sidebar() -> None:
             st.checkbox("Telegram уведомления", key="telegram_enabled",
                        value=notification_config.get('telegram_enabled', False))
         
-        if st.button("💾 Сохранить настройки", use_container_width=True, type="primary"):
+        if st.button("💾 Сохранить настройки", use_container_width=True, type="primary", key="save_settings_sidebar_btn"):
             config = st.session_state.config
             
             config.imap_server = st.session_state.imap_server
@@ -6808,16 +6814,16 @@ def render_settings_sidebar() -> None:
             st.progress(st.session_state.progress_value / 100)
             st.info(f"📌 {st.session_state.progress_message}")
             
-            if st.button("⏹️ Остановить", use_container_width=True):
+            if st.button("⏹️ Остановить", use_container_width=True, key="stop_robot_btn"):
                 st.session_state.is_running = False
                 st.rerun()
         else:
-            if st.button("🚀 Запустить робота", use_container_width=True, type="primary"):
+            if st.button("🚀 Запустить робота", use_container_width=True, type="primary", key="start_robot_btn"):
                 run_robot()
                 st.rerun()
         
         with st.expander("🔧 Системные действия"):
-            if st.button("🧹 Очистить временные файлы", use_container_width=True):
+            if st.button("🧹 Очистить временные файлы", use_container_width=True, key="cleanup_temp_btn"):
                 if st.session_state.robot:
                     cleaned = st.session_state.robot.cleanup_temp_files()
                     st.success(f"Очищено {cleaned} файлов")
@@ -6826,7 +6832,7 @@ def render_settings_sidebar() -> None:
                     cleaned = robot.cleanup_temp_files()
                     st.success(f"Очищено {cleaned} файлов")
             
-            if st.button("💿 Создать бэкап БД", use_container_width=True):
+            if st.button("💿 Создать бэкап БД", use_container_width=True, key="backup_db_btn"):
                 if st.session_state.robot:
                     backup_path = st.session_state.robot.backup_database()
                 else:
@@ -6834,7 +6840,7 @@ def render_settings_sidebar() -> None:
                     backup_path = robot.backup_database()
                 st.success(f"Бэкап создан: {backup_path}")
             
-            if st.button("🔄 Обновить данные из Sheets", use_container_width=True):
+            if st.button("🔄 Обновить данные из Sheets", use_container_width=True, key="refresh_sheets_btn"):
                 if st.session_state.product_db:
                     st.session_state.product_db.refresh_data()
                     st.success("Данные обновлены")
@@ -6909,6 +6915,7 @@ def render_main_content() -> None:
                 for warning in result['warnings']:
                     st.warning(f"• {warning}")
     
+    # ОСНОВНЫЕ ВКЛАДКИ - уникальные ключи для каждой вкладки
     main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
         "📊 Панель управления",
         "🎓 Обучение прайса",
@@ -6925,6 +6932,7 @@ def render_main_content() -> None:
         render_price_learning_ui()
     
     with main_tab3:
+        # Используем вложенные вкладки с уникальными ключами
         analysis_subtab1, analysis_subtab2 = st.tabs(["📊 Анализ цен", "⚙️ Поставщики"])
         with analysis_subtab1:
             render_analysis_tab()
