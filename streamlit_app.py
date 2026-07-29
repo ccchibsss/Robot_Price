@@ -6679,776 +6679,407 @@ class PriceRobot:
 
 
 # ===================================================================
-# БЛОК 15: ИНТЕРФЕЙС STREAMLIT - ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# БЛОК 15: ИНТЕРФЕЙС STREAMLIT - КОНСТРУКТОР МАППИНГА С ЛОКАЛЬНОЙ ЗАГРУЗКОЙ (ПОЛНЫЙ БЕЗ СОКРАЩЕНИЙ)
 # ===================================================================
 
-def init_session_state() -> None:
-    """Расширенная инициализация состояния сессии"""
-    if 'logger' not in st.session_state:
-        st.session_state.logger = StreamlitLogger()
-    
-    if 'config' not in st.session_state:
-        st.session_state.config = Config.load()
-    
-    if 'product_db' not in st.session_state:
-        try:
-            st.session_state.product_db = GoogleSheetsDatabase(
-                st.session_state.config,
-                st.session_state.logger
-            )
-        except Exception as e:
-            st.session_state.product_db = None
-            st.error(f"Ошибка подключения к Google Sheets: {e}")
-    
-    if 'analysis_result' not in st.session_state:
-        st.session_state.analysis_result = None
-    
-    if 'analyzer' not in st.session_state:
-        st.session_state.analyzer = None
-    
-    if 'is_running' not in st.session_state:
-        st.session_state.is_running = False
-    
-    if 'result' not in st.session_state:
-        st.session_state.result = None
-    
-    if 'progress_message' not in st.session_state:
-        st.session_state.progress_message = ""
-    
-    if 'progress_value' not in st.session_state:
-        st.session_state.progress_value = 0
-    
-    if 'robot' not in st.session_state:
-        st.session_state.robot = None
-    
-    if 'db' not in st.session_state:
-        st.session_state.db = Database(st.session_state.config.db_path)
-    
-    if 'notification_manager' not in st.session_state:
-        st.session_state.notification_manager = NotificationManager(
-            st.session_state.config,
-            st.session_state.logger
-        )
-    
-    if 'selected_supplier' not in st.session_state:
-        st.session_state.selected_supplier = None
-    
-    if 'auto_refresh' not in st.session_state:
-        st.session_state.auto_refresh = False
-    
-    if 'mapping_constructor' not in st.session_state:
-        st.session_state.mapping_constructor = None
-
-
-def save_config() -> None:
-    """Сохранение конфигурации"""
-    try:
-        st.session_state.config.save()
-        st.success("✅ Конфигурация сохранена")
-    except Exception as e:
-        st.error(f"❌ Ошибка сохранения: {e}")
-
-
-def run_robot() -> None:
-    """Запуск робота"""
-    if st.session_state.is_running:
-        st.warning("⚠️ Робот уже запущен")
-        return
-    
-    config = st.session_state.config
-    
-    if not config.email_user or not config.email_pass:
-        st.error("❌ Заполните настройки почты")
-        return
-    
-    if not config.yandex_token or config.campaign_id == 0:
-        st.warning("⚠️ Не заполнены настройки Яндекс Маркета (будет пропущена отправка)")
-    
-    st.session_state.robot = PriceRobot(config, st.session_state.logger)
-    st.session_state.is_running = True
-    st.session_state.result = None
-    st.session_state.progress_value = 0
-    st.session_state.logger.clear()
-    
-    def run_thread() -> None:
-        """Фоновый поток выполнения"""
-        try:
-            result = st.session_state.robot.run_full_cycle(
-                progress_callback=lambda msg: update_progress(msg)
-            )
-            st.session_state.result = result
-        except Exception as e:
-            st.session_state.logger.error(f"Ошибка в потоке: {str(e)}")
-            st.session_state.result = {
-                'status': 'failed',
-                'errors': [str(e)],
-                'files_found': 0,
-                'files_processed': 0,
-                'products_updated': 0,
-                'products_added': 0,
-                'offers_sent': 0,
-                'duration': 0
-            }
-        finally:
-            st.session_state.is_running = False
-            st.session_state.progress_value = 100
-    
-    def update_progress(msg: str) -> None:
-        """Обновление прогресса"""
-        st.session_state.progress_message = msg
-        if st.session_state.progress_value < 90:
-            st.session_state.progress_value += 5
-    
-    thread = threading.Thread(target=run_thread, daemon=True)
-    thread.start()
-
-
-def run_analysis() -> None:
-    """Запуск анализа прайсов"""
-    try:
-        config = st.session_state.config
-        logger = st.session_state.logger
-        
-        with st.spinner("Загрузка прайсов от поставщиков..."):
-            downloader = MultiSupplierDownloader(config, logger)
-            downloaded_files = downloader.download_all_suppliers()
-        
-        if not downloaded_files:
-            st.warning("⚠️ Не удалось загрузить ни одного прайса")
-            return
-        
-        with st.spinner("Парсинг файлов..."):
-            parser = PriceParser(config, logger)
-            parsed_files = {}
-            
-            for file_data in downloaded_files:
-                try:
-                    filename = file_data.get('filename', 'unknown')
-                    content = file_data.get('content', b'')
-                    supplier_name = file_data.get('supplier', 'Unknown')
-                    
-                    if not content:
-                        continue
-                    
-                    mapping = config.get_supplier_mapping(supplier_name)
-                    
-                    if mapping and any(mapping.values()):
-                        df = parser.parse(filename, content, mapping)
-                    else:
-                        df = parser.parse(filename, content)
-                    
-                    if not df.empty:
-                        df['supplier'] = supplier_name
-                        df['supplier_email'] = file_data.get('supplier_email', '')
-                        df['source_file'] = filename
-                        parsed_files[filename] = df
-                        
-                except Exception as e:
-                    logger.error(f"Ошибка парсинга {file_data.get('filename', 'unknown')}: {e}")
-        
-        if not parsed_files:
-            st.warning("⚠️ Не удалось распарсить ни одного файла")
-            return
-        
-        with st.spinner("Анализ цен..."):
-            analyzer = PriceAnalyzer(config, logger)
-            st.session_state.analyzer = analyzer
-            result_df = analyzer.analyze(parsed_files)
-        
-        if result_df.empty:
-            st.warning("⚠️ Анализ не дал результатов")
-            return
-        
-        st.session_state.analysis_result = result_df
-        
-        supplier_count = len(set(f.get('supplier', 'Unknown') for f in downloaded_files))
-        total_products = sum(len(df) for df in parsed_files.values())
-        unique_skus = len(result_df)
-        
-        st.success(
-            f"✅ Анализ завершен! Найдено {unique_skus} уникальных товаров "
-            f"от {supplier_count} поставщиков"
-        )
-        st.rerun()
-        
-    except Exception as e:
-        st.error(f"❌ Ошибка анализа: {str(e)}")
-        st.session_state.logger.error(f"Ошибка анализа: {e}")
-
-
 def render_mapping_constructor_ui() -> None:
-    """Интерфейс конструктора маппинга с локальной загрузкой"""
+    """Интерфейс конструктора маппинга с локальной загрузкой - ПОЛНОСТЬЮ РАБОЧАЯ ВЕРСИЯ"""
     st.subheader("🛠️ Конструктор маппинга колонок")
-    
     st.markdown("""
-    **Расширенные возможности:**
-    1. 📤 **Локальная загрузка** — загрузите файл прайса с компьютера
-    2. 📧 **Загрузка из почты** — загрузите файл из почты поставщика
-    3. 🔗 **Загрузка по URL** — загрузите файл по ссылке
-    4. 📂 **Образец из архива** — используйте ранее загруженный файл
-    5. 🔍 Автоматическое определение колонок
-    6. 🎯 Ручная настройка соответствия полей
-    7. 📋 Использование готовых шаблонов
-    8. ✅ Валидация маппинга перед сохранением
-    9. 📜 Просмотр истории изменений
-    """)
+    **📤 ЛОКАЛЬНАЯ ЗАГРУЗКА ПРАЙСОВ**
     
-    if st.session_state.mapping_constructor is None:
+    Загрузите файл прайса с компьютера для настройки соответствия колонок.
+    Поддерживаются форматы: **XLSX, XLS, CSV, XML, JSON, TXT, ODS**
+    """)
+    if 'mapping_constructor' not in st.session_state:
         st.session_state.mapping_constructor = MappingConstructor(
             st.session_state.config,
             st.session_state.logger
         )
-    
     mapping_constructor = st.session_state.mapping_constructor
-    
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📤 Загрузка и настройка",
+    suppliers = st.session_state.config.suppliers
+    supplier_names = [s.get('name', 'Unknown') for s in suppliers]
+    if not supplier_names:
+        st.warning("⚠️ Сначала добавьте поставщика в разделе 'Поставщики'")
+        return
+    selected_supplier = st.selectbox(
+        "👤 Выберите поставщика для настройки",
+        supplier_names,
+        key="mapping_supplier_select_main"
+    )
+    current_mapping = st.session_state.config.get_supplier_mapping(selected_supplier)
+    mapping_stats = mapping_constructor.get_mapping_statistics(selected_supplier)
+    if current_mapping and any(current_mapping.values()):
+        with st.expander("✅ Текущий маппинг поставщика", expanded=True):
+            if mapping_stats['required_fields_mapped']:
+                st.success("🟢 Все обязательные поля настроены")
+            else:
+                st.warning("🔴 Обязательные поля не настроены")
+            st.markdown(f"**Настроено полей:** {mapping_stats['mapped_fields_count']} из {mapping_stats['total_possible_fields']}")
+            st.markdown(f"**Последнее обновление:** {mapping_stats.get('last_updated', 'Никогда')[:19] if mapping_stats.get('last_updated') else 'Никогда'}")
+            st.markdown("---")
+            st.markdown("**Соответствие колонок:**")
+            col1, col2 = st.columns(2)
+            mapped_items = [(target, source) for target, source in current_mapping.items() if source]
+            for i, (target, source) in enumerate(mapped_items):
+                if i % 2 == 0:
+                    with col1:
+                        st.markdown(f"• **{target}** → `{source}`")
+                else:
+                    with col2:
+                        st.markdown(f"• **{target}** → `{source}`")
+    else:
+        st.info("ℹ️ Маппинг для этого поставщика еще не настроен")
+    st.divider()
+    st.markdown("### 📤 ЗАГРУЗИТЕ ФАЙЛ ПРАЙСА")
+    if 'file_loaded_main' not in st.session_state:
+        st.session_state.file_loaded_main = False
+        st.session_state.file_content_main = None
+        st.session_state.file_filename_main = None
+        st.session_state.df_main = None
+        st.session_state.columns_main = None
+        st.session_state.metadata_main = None
+    uploaded_file = st.file_uploader(
+        "Выберите файл прайса с компьютера",
+        type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
+        help="Загрузите файл прайса для настройки маппинга",
+        key="main_file_uploader"
+    )
+    if uploaded_file is not None:
+        try:
+            file_content = uploaded_file.read()
+            file_filename = uploaded_file.name
+            mapping_constructor.save_uploaded_file(file_content, file_filename)
+            st.success(f"✅ Файл загружен: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
+            with st.spinner("Анализ файла..."):
+                df, columns, metadata = mapping_constructor.preview_file(file_content, file_filename)
+                if df.empty:
+                    st.error("❌ Файл пуст или не содержит данных")
+                    st.stop()
+                st.session_state.file_loaded_main = True
+                st.session_state.file_content_main = file_content
+                st.session_state.file_filename_main = file_filename
+                st.session_state.df_main = df
+                st.session_state.columns_main = columns
+                st.session_state.metadata_main = metadata
+                st.success(f"✅ Файл успешно распарсен: {len(df)} строк, {len(columns)} колонок")
+        except Exception as e:
+            st.error(f"❌ Ошибка загрузки файла: {str(e)}")
+            st.exception(e)
+            st.session_state.file_loaded_main = False
+    if st.session_state.file_loaded_main and st.session_state.df_main is not None:
+        df = st.session_state.df_main
+        metadata = st.session_state.metadata_main
+        columns = st.session_state.columns_main
+        with st.expander("📊 Информация о файле", expanded=True):
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📄 Строк", metadata.get('row_count', 0))
+            with col2:
+                st.metric("📊 Колонок", metadata.get('column_count', 0))
+            with col3:
+                st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
+            with col4:
+                st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
+            if metadata.get('column_types'):
+                st.markdown("**Типы колонок (автоопределение):**")
+                type_cols = st.columns(3)
+                for i, (col, col_type) in enumerate(metadata['column_types'].items()):
+                    type_emoji = {
+                        'integer': '🔢',
+                        'decimal': '💲',
+                        'short_text': '📝',
+                        'text': '📄',
+                        'long_text': '📑',
+                        'empty': '🫗'
+                    }.get(col_type, '❓')
+                    with type_cols[i % 3]:
+                        st.markdown(f"{type_emoji} **{col}**: *{col_type}*")
+        st.subheader("📋 Предпросмотр данных")
+        preview_rows = st.slider(
+            "Количество строк для предпросмотра",
+            min_value=5,
+            max_value=100,
+            value=20,
+            step=5,
+            key="preview_rows_main"
+        )
+        st.dataframe(
+            df.head(preview_rows),
+            use_container_width=True,
+            height=400
+        )
+        with st.expander("📊 Статистика по колонкам"):
+            col_stats = []
+            for col in df.columns:
+                col_stats.append({
+                    'Колонка': col,
+                    'Тип': metadata['column_types'].get(col, 'unknown'),
+                    'Непустых': len(df) - df[col].isna().sum(),
+                    'Пустых': df[col].isna().sum(),
+                    'Уникальных': df[col].nunique(),
+                    'Пример': ', '.join([str(x) for x in df[col].dropna().head(3).tolist()])
+                })
+            st.dataframe(
+                pd.DataFrame(col_stats),
+                use_container_width=True,
+                hide_index=True
+            )
+        st.divider()
+        st.subheader("🎯 Настройка маппинга колонок")
+        st.markdown("Выберите, какая колонка в файле соответствует каждому полю:")
+        columns_options = [''] + df.columns.tolist()
+        def get_column_index(column_name: str) -> int:
+            if column_name and column_name in columns_options:
+                return columns_options.index(column_name)
+            return 0
+        st.markdown("### 📌 Обязательные поля")
+        st.markdown("*Поля, отмеченные звёздочкой (*), обязательны для заполнения*")
+        col1, col2 = st.columns(2)
+        with col1:
+            sku_col = st.selectbox(
+                "📌 Артикул (SKU) *",
+                options=columns_options,
+                index=get_column_index(current_mapping.get('sku', '')),
+                key="mapping_sku_main",
+                help="Уникальный идентификатор товара"
+            )
+        with col2:
+            price_col = st.selectbox(
+                "💰 Цена *",
+                options=columns_options,
+                index=get_column_index(current_mapping.get('price', '')),
+                key="mapping_price_main",
+                help="Цена товара"
+            )
+        with st.expander("📦 Основные поля", expanded=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                stock_col = st.selectbox(
+                    "📦 Остаток",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('stock', '')),
+                    key="mapping_stock_main",
+                    help="Количество товара на складе"
+                )
+                brand_col = st.selectbox(
+                    "🏷️ Бренд",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('brand', '')),
+                    key="mapping_brand_main",
+                    help="Производитель или бренд товара"
+                )
+                category_col = st.selectbox(
+                    "📂 Категория",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('category', '')),
+                    key="mapping_category_main",
+                    help="Категория или раздел товара"
+                )
+            with col2:
+                name_col = st.selectbox(
+                    "📝 Название",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('name', '')),
+                    key="mapping_name_main",
+                    help="Наименование товара"
+                )
+                description_col = st.selectbox(
+                    "📄 Описание",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('description', '')),
+                    key="mapping_description_main",
+                    help="Описание товара"
+                )
+                barcode_col = st.selectbox(
+                    "🔢 Штрихкод",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('barcode', '')),
+                    key="mapping_barcode_main",
+                    help="Штрихкод или EAN товара"
+                )
+        with st.expander("📋 Дополнительные поля", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                weight_col = st.selectbox(
+                    "⚖️ Вес",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('weight', '')),
+                    key="mapping_weight_main",
+                    help="Вес товара"
+                )
+                country_col = st.selectbox(
+                    "🌍 Страна",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('country', '')),
+                    key="mapping_country_main",
+                    help="Страна производства"
+                )
+                warranty_col = st.selectbox(
+                    "🛡️ Гарантия",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('warranty', '')),
+                    key="mapping_warranty_main",
+                    help="Срок гарантии"
+                )
+                currency_col = st.selectbox(
+                    "💱 Валюта",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('currency', '')),
+                    key="mapping_currency_main",
+                    help="Валюта цены"
+                )
+            with col2:
+                dimensions_col = st.selectbox(
+                    "📐 Размеры",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('dimensions', '')),
+                    key="mapping_dimensions_main",
+                    help="Габариты товара"
+                )
+                min_order_col = st.selectbox(
+                    "📦 Мин. заказ",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('min_order_qty', '')),
+                    key="mapping_min_order_main",
+                    help="Минимальное количество для заказа"
+                )
+                vat_col = st.selectbox(
+                    "🧾 НДС",
+                    options=columns_options,
+                    index=get_column_index(current_mapping.get('vat', '')),
+                    key="mapping_vat_main",
+                    help="Ставка НДС"
+                )
+        if not sku_col or not price_col:
+            st.error("❌ **Артикул (SKU)** и **Цена** — обязательные поля! Выберите соответствующие колонки.")
+        else:
+            new_mapping = {
+                'sku': sku_col,
+                'price': price_col,
+                'stock': stock_col if stock_col else '',
+                'brand': brand_col if brand_col else '',
+                'name': name_col if name_col else '',
+                'category': category_col if category_col else '',
+                'description': description_col if description_col else '',
+                'weight': weight_col if weight_col else '',
+                'barcode': barcode_col if barcode_col else '',
+                'country': country_col if country_col else '',
+                'warranty': warranty_col if warranty_col else '',
+                'dimensions': dimensions_col if dimensions_col else '',
+                'min_order_qty': min_order_col if min_order_col else '',
+                'currency': currency_col if currency_col else '',
+                'vat': vat_col if vat_col else ''
+            }
+            new_mapping = {k: v for k, v in new_mapping.items() if v}
+            validation = mapping_constructor.validate_mapping(df, new_mapping)
+            if not validation.is_valid:
+                st.error("❌ **Ошибки валидации маппинга:**")
+                for error in validation.errors:
+                    st.error(f"• {error}")
+            if validation.warnings:
+                st.warning("⚠️ **Предупреждения:**")
+                for warning in validation.warnings:
+                    st.warning(f"• {warning}")
+            if validation.is_valid:
+                st.subheader("🔍 Результат маппинга (предпросмотр)")
+                result_df = mapping_constructor.parser._apply_mapping(df.copy(), new_mapping)
+                if not result_df.empty:
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("📦 Товаров", len(result_df))
+                    with col2:
+                        valid_prices = (result_df['price'] > 0).sum()
+                        st.metric("💰 С ценой", valid_prices)
+                    with col3:
+                        with_stock = (result_df['stock'] > 0).sum()
+                        st.metric("📦 В наличии", with_stock)
+                    with col4:
+                        unique_skus = result_df['sku'].nunique()
+                        st.metric("🔑 Уникальных SKU", unique_skus)
+                    st.dataframe(
+                        result_df.head(20),
+                        use_container_width=True,
+                        height=300,
+                        column_config={
+                            "sku": "Артикул",
+                            "price": st.column_config.NumberColumn("Цена", format="%.2f"),
+                            "stock": "Остаток",
+                            "brand": "Бренд",
+                            "name": "Название",
+                            "category": "Категория",
+                            "description": "Описание"
+                        }
+                    )
+                    if current_mapping and any(current_mapping.values()):
+                        comparison = mapping_constructor.compare_mappings(current_mapping, new_mapping)
+                        if comparison['has_changes']:
+                            with st.expander("🔄 Изменения относительно текущего маппинга", expanded=False):
+                                st.markdown(f"**Всего изменений:** {comparison['total_changes']}")
+                                st.markdown(f"• Добавлено полей: {comparison['added_fields']}")
+                                st.markdown(f"• Удалено полей: {comparison['removed_fields']}")
+                                st.markdown(f"• Изменено полей: {comparison['modified_fields']}")
+                                for change in comparison['changes']:
+                                    emoji = {
+                                        'added': '➕',
+                                        'removed': '➖',
+                                        'modified': '✏️'
+                                    }.get(change['change_type'], '•')
+                                    st.markdown(
+                                        f"{emoji} **{change['field']}**: "
+                                        f"`{change['old_value']}` → `{change['new_value']}`"
+                                    )
+                    st.divider()
+                    st.subheader("💾 Сохранение маппинга")
+                    col1, col2, col3 = st.columns([2, 1, 1])
+                    with col1:
+                        save_comment = st.text_input(
+                            "📝 Комментарий к сохранению",
+                            placeholder="Например: Обновлен маппинг после нового прайса",
+                            key="save_comment_main"
+                        )
+                    with col2:
+                        if st.button("💾 Сохранить маппинг", type="primary", use_container_width=True, key="save_mapping_main"):
+                            if mapping_constructor.save_mapping(
+                                selected_supplier,
+                                new_mapping,
+                                created_by='user',
+                                comment=save_comment
+                            ):
+                                st.success(f"✅ Маппинг сохранен для **{selected_supplier}**!")
+                                st.balloons()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("❌ Ошибка сохранения маппинга")
+                    with col3:
+                        if current_mapping and any(current_mapping.values()):
+                            if st.button("🔄 Сбросить маппинг", type="secondary", use_container_width=True, key="reset_mapping_main"):
+                                if st.session_state.get("confirm_reset_main", False):
+                                    if mapping_constructor.save_mapping(
+                                        selected_supplier,
+                                        {},
+                                        created_by='user',
+                                        comment='Маппинг сброшен'
+                                    ):
+                                        st.success("✅ Маппинг сброшен")
+                                        st.session_state.confirm_reset_main = False
+                                        time.sleep(1)
+                                        st.rerun()
+                                else:
+                                    st.session_state.confirm_reset_main = True
+                                    st.warning("⚠️ Нажмите еще раз для подтверждения сброса")
+    st.divider()
+    extra_tab1, extra_tab2, extra_tab3, extra_tab4 = st.tabs([
         "📧 Загрузка из почты",
         "🔍 Автоопределение",
         "📋 Шаблоны",
         "📜 История"
     ])
-    
-    with tab1:
-        st.markdown("## 📤 Загрузка прайса для настройки маппинга")
-        st.markdown("Загрузите файл прайса с компьютера для настройки соответствия колонок.")
-        
-        suppliers = st.session_state.config.suppliers
-        supplier_names = [s.get('name', 'Unknown') for s in suppliers]
-        
-        if not supplier_names:
-            st.warning("⚠️ Сначала добавьте поставщика в разделе 'Поставщики'")
-            return
-        
-        selected_supplier = st.selectbox(
-            "Выберите поставщика для настройки",
-            supplier_names,
-            key="mapping_supplier_select_local"
-        )
-        
-        current_mapping = st.session_state.config.get_supplier_mapping(selected_supplier)
-        mapping_stats = mapping_constructor.get_mapping_statistics(selected_supplier)
-        
-        if current_mapping and any(current_mapping.values()):
-            with st.expander("✅ Текущий маппинг поставщика", expanded=True):
-                status_color = "green" if mapping_stats['required_fields_mapped'] else "orange"
-                if not mapping_stats['required_fields_mapped']:
-                    st.markdown("**Статус:** 🔴 Обязательные поля не настроены")
-                else:
-                    st.markdown("**Статус:** 🟢 Все обязательные поля настроены")
-                st.markdown(f"**Настроено полей:** {mapping_stats['mapped_fields_count']} из {mapping_stats['total_possible_fields']}")
-                st.markdown(f"**Последнее обновление:** {mapping_stats.get('last_updated', 'Никогда')[:19] if mapping_stats.get('last_updated') else 'Никогда'}")
-                
-                st.markdown("---")
-                st.markdown("**Соответствие колонок:**")
-                
-                col1, col2 = st.columns(2)
-                mapped_items = [(target, source) for target, source in current_mapping.items() if source]
-                
-                for i, (target, source) in enumerate(mapped_items):
-                    if i % 2 == 0:
-                        with col1:
-                            st.markdown(f"• **{target}** → `{source}`")
-                    else:
-                        with col2:
-                            st.markdown(f"• **{target}** → `{source}`")
-        else:
-            st.info("ℹ️ Маппинг для этого поставщика еще не настроен")
-        
-        st.divider()
-        
-        st.subheader("📂 Выберите способ загрузки файла")
-        
-        load_method = st.radio(
-            "Способ загрузки прайса:",
-            [
-                "📤 Загрузить с компьютера (локально)",
-                "📂 Использовать образец из архива",
-                "🔗 Загрузить по URL"
-            ],
-            key="load_method_local",
-            horizontal=True
-        )
-        
-        file_content = None
-        file_filename = None
-        file_loaded = False
-        
-        if load_method == "📤 Загрузить с компьютера (локально)":
-            st.markdown("### 📤 Загрузка файла с компьютера")
-            st.markdown("Поддерживаемые форматы: **XLSX, XLS, CSV, XML, JSON, TXT, ODS**")
-            
-            uploaded_file = st.file_uploader(
-                "Выберите файл прайса",
-                type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
-                help="Загрузите файл прайса с вашего компьютера",
-                key="local_file_uploader"
-            )
-            
-            if uploaded_file is not None:
-                file_content = uploaded_file.read()
-                file_filename = uploaded_file.name
-                file_loaded = True
-                
-                try:
-                    saved_path = mapping_constructor.save_uploaded_file(file_content, file_filename)
-                    st.success(f"✅ Файл сохранен: `{saved_path}`")
-                except Exception as e:
-                    st.warning(f"⚠️ Не удалось сохранить файл локально: {e}")
-        
-        elif load_method == "📂 Использовать образец из архива":
-            st.markdown("### 📂 Образец из архива поставщика")
-            st.markdown("Будет загружен последний сохраненный файл от этого поставщика.")
-            
-            if st.button("🔍 Найти образец в архиве", key="find_sample_btn", use_container_width=True):
-                with st.spinner("Поиск файлов в архиве..."):
-                    sample = mapping_constructor.load_sample_from_supplier(selected_supplier)
-                    
-                    if sample:
-                        file_content, file_filename = sample
-                        file_loaded = True
-                        st.success(f"✅ Найден файл: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
-                    else:
-                        st.warning(f"⚠️ Не найдено сохраненных файлов для поставщика '{selected_supplier}'")
-                        st.info("💡 Сначала загрузите файл через почту или локально, чтобы он появился в архиве.")
-            
-            with st.expander("📋 Доступные файлы в архиве"):
-                archive_files = mapping_constructor.get_uploaded_files_list()
-                
-                if archive_files:
-                    st.markdown(f"Найдено файлов: {len(archive_files)}")
-                    
-                    for file_info in archive_files[:20]:
-                        col1, col2, col3 = st.columns([3, 2, 1])
-                        
-                        with col1:
-                            st.markdown(f"📄 `{file_info['filename']}`")
-                        
-                        with col2:
-                            st.markdown(f"📏 {file_info['size_formatted']}")
-                        
-                        with col3:
-                            if st.button("📥 Загрузить", key=f"load_{file_info['filename'][:20]}", use_container_width=True):
-                                try:
-                                    loaded_content, loaded_filename = mapping_constructor.load_file_from_local(
-                                        file_info['filepath']
-                                    )
-                                    file_content = loaded_content
-                                    file_filename = loaded_filename
-                                    file_loaded = True
-                                    st.success(f"✅ Файл загружен!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Ошибка: {e}")
-                else:
-                    st.info("Нет сохраненных файлов")
-        
-        elif load_method == "🔗 Загрузить по URL":
-            st.markdown("### 🔗 Загрузка файла по ссылке")
-            st.markdown("Введите прямую ссылку на файл прайса.")
-            
-            url_input = st.text_input(
-                "URL файла",
-                placeholder="https://example.com/pricelist.xlsx",
-                key="url_input_mapping"
-            )
-            
-            custom_filename = st.text_input(
-                "Имя файла (опционально)",
-                placeholder="Если не указано, будет извлечено из URL",
-                key="custom_filename_mapping"
-            )
-            
-            if st.button("🔗 Загрузить по URL", key="load_url_btn", use_container_width=True):
-                if url_input:
-                    with st.spinner("Загрузка файла по URL..."):
-                        try:
-                            filename = custom_filename if custom_filename else None
-                            file_content, file_filename = mapping_constructor.load_file_from_url(
-                                url_input, 
-                                filename
-                            )
-                            file_loaded = True
-                            st.success(f"✅ Файл загружен: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
-                        except Exception as e:
-                            st.error(f"❌ Ошибка загрузки: {str(e)}")
-                else:
-                    st.error("❌ Введите URL файла")
-        
-        st.divider()
-        
-        if file_loaded and file_content is not None and file_filename is not None:
-            try:
-                with st.spinner("Анализ файла..."):
-                    df, columns, metadata = mapping_constructor.preview_file(file_content, file_filename)
-                
-                if df.empty:
-                    st.warning("⚠️ Не удалось распарсить файл или файл пуст")
-                    st.stop()
-                
-                with st.expander("📊 Информация о файле", expanded=True):
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("📄 Строк", metadata.get('row_count', 0))
-                    
-                    with col2:
-                        st.metric("📊 Колонок", metadata.get('column_count', 0))
-                    
-                    with col3:
-                        st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
-                    
-                    with col4:
-                        st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
-                    
-                    if metadata.get('column_types'):
-                        st.markdown("**Типы колонок (автоопределение):**")
-                        type_cols = st.columns(3)
-                        for i, (col, col_type) in enumerate(metadata['column_types'].items()):
-                            type_emoji = {
-                                'integer': '🔢',
-                                'decimal': '💲',
-                                'short_text': '📝',
-                                'text': '📄',
-                                'long_text': '📑',
-                                'empty': '🫗'
-                            }.get(col_type, '❓')
-                            
-                            with type_cols[i % 3]:
-                                st.markdown(f"{type_emoji} **{col}**: *{col_type}*")
-                
-                st.subheader("📋 Предпросмотр данных")
-                
-                preview_rows = st.slider(
-                    "Количество строк для предпросмотра",
-                    min_value=5,
-                    max_value=100,
-                    value=20,
-                    step=5,
-                    key="preview_rows_slider"
-                )
-                
-                st.dataframe(
-                    df.head(preview_rows),
-                    use_container_width=True,
-                    height=400
-                )
-                
-                with st.expander("📊 Статистика по колонкам"):
-                    col_stats = []
-                    for col in df.columns:
-                        col_stats.append({
-                            'Колонка': col,
-                            'Тип': metadata['column_types'].get(col, 'unknown'),
-                            'Непустых': len(df) - metadata['null_counts'].get(col, 0),
-                            'Пустых': metadata['null_counts'].get(col, 0),
-                            'Уникальных': metadata['unique_counts'].get(col, 0),
-                            'Пример': ', '.join([str(x) for x in metadata['sample_values'].get(col, [])[:3]])
-                        })
-                    
-                    st.dataframe(
-                        pd.DataFrame(col_stats),
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                
-                st.subheader("🎯 Настройка маппинга колонок")
-                st.markdown("Выберите, какая колонка в файле соответствует каждому полю:")
-                
-                columns_options = [''] + df.columns.tolist()
-                
-                def get_column_index(column_name: str) -> int:
-                    if column_name and column_name in columns_options:
-                        return columns_options.index(column_name)
-                    return 0
-                
-                with st.expander("📌 Обязательные поля", expanded=True):
-                    st.markdown("*Поля, отмеченные звёздочкой (*), обязательны для заполнения*")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        sku_col = st.selectbox(
-                            "📌 Артикул (SKU) *",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('sku', '')),
-                            key="mapping_sku_local",
-                            help="Уникальный идентификатор товара. Обязательное поле."
-                        )
-                    
-                    with col2:
-                        price_col = st.selectbox(
-                            "💰 Цена *",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('price', '')),
-                            key="mapping_price_local",
-                            help="Цена товара. Обязательное поле."
-                        )
-                
-                with st.expander("📦 Основные поля", expanded=True):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        stock_col = st.selectbox(
-                            "📦 Остаток",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('stock', '')),
-                            key="mapping_stock_local",
-                            help="Количество товара на складе"
-                        )
-                        
-                        brand_col = st.selectbox(
-                            "🏷️ Бренд",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('brand', '')),
-                            key="mapping_brand_local",
-                            help="Производитель или бренд товара"
-                        )
-                        
-                        category_col = st.selectbox(
-                            "📂 Категория",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('category', '')),
-                            key="mapping_category_local",
-                            help="Категория или раздел товара"
-                        )
-                    
-                    with col2:
-                        name_col = st.selectbox(
-                            "📝 Название",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('name', '')),
-                            key="mapping_name_local",
-                            help="Наименование товара"
-                        )
-                        
-                        description_col = st.selectbox(
-                            "📄 Описание",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('description', '')),
-                            key="mapping_description_local",
-                            help="Описание товара"
-                        )
-                        
-                        barcode_col = st.selectbox(
-                            "🔢 Штрихкод",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('barcode', '')),
-                            key="mapping_barcode_local",
-                            help="Штрихкод или EAN товара"
-                        )
-                
-                with st.expander("📋 Дополнительные поля", expanded=False):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        weight_col = st.selectbox(
-                            "⚖️ Вес",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('weight', '')),
-                            key="mapping_weight_local",
-                            help="Вес товара"
-                        )
-                        
-                        country_col = st.selectbox(
-                            "🌍 Страна",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('country', '')),
-                            key="mapping_country_local",
-                            help="Страна производства"
-                        )
-                        
-                        warranty_col = st.selectbox(
-                            "🛡️ Гарантия",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('warranty', '')),
-                            key="mapping_warranty_local",
-                            help="Срок гарантии"
-                        )
-                        
-                        currency_col = st.selectbox(
-                            "💱 Валюта",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('currency', '')),
-                            key="mapping_currency_local",
-                            help="Валюта цены"
-                        )
-                    
-                    with col2:
-                        dimensions_col = st.selectbox(
-                            "📐 Размеры",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('dimensions', '')),
-                            key="mapping_dimensions_local",
-                            help="Габариты товара"
-                        )
-                        
-                        min_order_col = st.selectbox(
-                            "📦 Мин. заказ",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('min_order_qty', '')),
-                            key="mapping_min_order_local",
-                            help="Минимальное количество для заказа"
-                        )
-                        
-                        vat_col = st.selectbox(
-                            "🧾 НДС",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('vat', '')),
-                            key="mapping_vat_local",
-                            help="Ставка НДС"
-                        )
-                
-                if not sku_col or not price_col:
-                    st.error("❌ **Артикул (SKU)** и **Цена** — обязательные поля. Выберите соответствующие колонки.")
-                else:
-                    new_mapping = {
-                        'sku': sku_col,
-                        'price': price_col,
-                        'stock': stock_col if stock_col else '',
-                        'brand': brand_col if brand_col else '',
-                        'name': name_col if name_col else '',
-                        'category': category_col if category_col else '',
-                        'description': description_col if description_col else '',
-                        'weight': weight_col if weight_col else '',
-                        'barcode': barcode_col if barcode_col else '',
-                        'country': country_col if country_col else '',
-                        'warranty': warranty_col if warranty_col else '',
-                        'dimensions': dimensions_col if dimensions_col else '',
-                        'min_order_qty': min_order_col if min_order_col else '',
-                        'currency': currency_col if currency_col else '',
-                        'vat': vat_col if vat_col else ''
-                    }
-                    
-                    new_mapping = {k: v for k, v in new_mapping.items() if v}
-                    
-                    validation = mapping_constructor.validate_mapping(df, new_mapping)
-                    
-                    if not validation.is_valid:
-                        st.error("❌ **Ошибки валидации маппинга:**")
-                        for error in validation.errors:
-                            st.error(f"• {error}")
-                    
-                    if validation.warnings:
-                        st.warning("⚠️ **Предупреждения:**")
-                        for warning in validation.warnings:
-                            st.warning(f"• {warning}")
-                    
-                    if validation.is_valid:
-                        st.subheader("🔍 Результат маппинга (предпросмотр)")
-                        
-                        result_df = mapping_constructor.parser._apply_mapping(df.copy(), new_mapping)
-                        
-                        if not result_df.empty:
-                            col1, col2, col3, col4 = st.columns(4)
-                            
-                            with col1:
-                                st.metric("📦 Товаров", len(result_df))
-                            
-                            with col2:
-                                valid_prices = (result_df['price'] > 0).sum()
-                                st.metric("💰 С ценой", valid_prices)
-                            
-                            with col3:
-                                with_stock = (result_df['stock'] > 0).sum()
-                                st.metric("📦 В наличии", with_stock)
-                            
-                            with col4:
-                                unique_skus = result_df['sku'].nunique()
-                                st.metric("🔑 Уникальных SKU", unique_skus)
-                            
-                            st.dataframe(
-                                result_df.head(20),
-                                use_container_width=True,
-                                height=400,
-                                column_config={
-                                    "sku": "Артикул",
-                                    "price": st.column_config.NumberColumn("Цена", format="%.2f"),
-                                    "stock": "Остаток",
-                                    "brand": "Бренд",
-                                    "name": "Название",
-                                    "category": "Категория",
-                                    "description": "Описание"
-                                }
-                            )
-                            
-                            if current_mapping and any(current_mapping.values()):
-                                comparison = mapping_constructor.compare_mappings(current_mapping, new_mapping)
-                                
-                                if comparison['has_changes']:
-                                    with st.expander("🔄 Изменения относительно текущего маппинга", expanded=False):
-                                        st.markdown(f"**Всего изменений:** {comparison['total_changes']}")
-                                        st.markdown(f"• Добавлено полей: {comparison['added_fields']}")
-                                        st.markdown(f"• Удалено полей: {comparison['removed_fields']}")
-                                        st.markdown(f"• Изменено полей: {comparison['modified_fields']}")
-                                        
-                                        for change in comparison['changes']:
-                                            emoji = {
-                                                'added': '➕',
-                                                'removed': '➖',
-                                                'modified': '✏️'
-                                            }.get(change['change_type'], '•')
-                                            
-                                            st.markdown(
-                                                f"{emoji} **{change['field']}**: "
-                                                f"`{change['old_value']}` → `{change['new_value']}`"
-                                            )
-                        
-                        st.divider()
-                        st.subheader("💾 Сохранение маппинга")
-                        
-                        col1, col2, col3 = st.columns([2, 1, 1])
-                        
-                        with col1:
-                            save_comment = st.text_input(
-                                "Комментарий к сохранению",
-                                placeholder="Например: Обновлены колонки после нового прайса",
-                                key="save_comment_local"
-                            )
-                        
-                        with col2:
-                            if st.button("💾 Сохранить маппинг", type="primary", use_container_width=True, key="save_mapping_local_btn"):
-                                if mapping_constructor.save_mapping(
-                                    selected_supplier,
-                                    new_mapping,
-                                    created_by='user',
-                                    comment=save_comment
-                                ):
-                                    st.success(f"✅ Маппинг сохранен для поставщика **{selected_supplier}**!")
-                                    st.balloons()
-                                    time.sleep(1)
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Ошибка сохранения маппинга")
-                        
-                        with col3:
-                            if current_mapping and any(current_mapping.values()):
-                                if st.button("🔄 Сбросить", type="secondary", use_container_width=True, key="reset_mapping_local_btn"):
-                                    if st.session_state.get(f"confirm_reset_local", False):
-                                        if mapping_constructor.save_mapping(
-                                            selected_supplier,
-                                            {},
-                                            created_by='user',
-                                            comment='Маппинг сброшен'
-                                        ):
-                                            st.success("✅ Маппинг сброшен")
-                                            st.session_state[f"confirm_reset_local"] = False
-                                            time.sleep(1)
-                                            st.rerun()
-                                    else:
-                                        st.session_state[f"confirm_reset_local"] = True
-                                        st.warning("⚠️ Нажмите еще раз для подтверждения сброса")
-            
-            except Exception as e:
-                st.error(f"❌ Ошибка обработки файла: {str(e)}")
-                st.exception(e)
-    
-    with tab2:
+    with extra_tab1:
         st.markdown("## 📧 Загрузка прайса из почты поставщика")
         st.markdown("Загрузите файл прайса напрямую из почтового ящика поставщика.")
-        
         email_suppliers = mapping_constructor.get_available_suppliers_for_email()
-        
         if not email_suppliers:
             st.warning("⚠️ Нет поставщиков с настроенной почтой. Добавьте email и пароль в разделе 'Поставщики'.")
             st.info("💡 Вы можете использовать локальную загрузку файла на вкладке '📤 Загрузка и настройка'.")
@@ -7458,7 +7089,6 @@ def render_mapping_constructor_ui() -> None:
                 email_suppliers,
                 key="email_supplier_select"
             )
-            
             max_emails = st.slider(
                 "Максимальное количество писем для проверки",
                 min_value=1,
@@ -7466,64 +7096,56 @@ def render_mapping_constructor_ui() -> None:
                 value=10,
                 key="max_emails_slider"
             )
-            
             if st.button("📧 Загрузить файлы из почты", type="primary", use_container_width=True, key="load_from_email_btn"):
                 with st.spinner(f"Подключение к почте поставщика {email_supplier}..."):
                     try:
                         files = mapping_constructor.load_file_from_email(email_supplier, max_emails)
-                        
                         if not files:
                             st.warning(f"⚠️ Не найдено файлов в почте поставщика {email_supplier}")
                         else:
                             st.success(f"✅ Загружено файлов: {len(files)}")
-                            
                             for i, (content, filename, subject) in enumerate(files):
                                 with st.expander(f"📄 {filename} ({len(content) / 1024:.1f} KB)", expanded=(i == 0)):
                                     st.markdown(f"**Из письма:** {subject[:100]}")
                                     st.markdown(f"**Размер:** {len(content) / 1024:.1f} KB")
-                                    
                                     if st.button("📥 Использовать для настройки", key=f"use_email_file_{i}", use_container_width=True):
-                                        st.session_state['email_file_content'] = content
-                                        st.session_state['email_file_filename'] = filename
-                                        st.success(f"✅ Файл `{filename}` выбран для настройки. Перейдите на вкладку '📤 Загрузка и настройка'.")
+                                        st.session_state.file_loaded_main = True
+                                        st.session_state.file_content_main = content
+                                        st.session_state.file_filename_main = filename
+                                        with st.spinner("Анализ файла..."):
+                                            df, columns, metadata = mapping_constructor.preview_file(content, filename)
+                                            st.session_state.df_main = df
+                                            st.session_state.columns_main = columns
+                                            st.session_state.metadata_main = metadata
+                                        st.success(f"✅ Файл `{filename}` выбран для настройки.")
                                         st.rerun()
-                    
                     except Exception as e:
                         st.error(f"❌ Ошибка загрузки из почты: {str(e)}")
-    
-    with tab3:
+    with extra_tab2:
         st.subheader("🔍 Автоматическое определение маппинга")
         st.markdown("""
         Загрузите файл, и система автоматически определит соответствие колонок
         на основе анализа содержимого и названий колонок.
         """)
-        
         auto_file = st.file_uploader(
             "📤 Загрузите файл для автоопределения",
             type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'ods'],
             key="auto_mapping_file_uploader"
         )
-        
         if auto_file is not None:
             try:
                 content = auto_file.read()
                 filename = auto_file.name
-                
                 mapping_constructor.save_uploaded_file(content, filename)
-                
                 with st.spinner("Анализ файла..."):
                     df = mapping_constructor.parser.parse(filename, content)
-                
                 if not df.empty:
                     st.subheader("📊 Предпросмотр файла")
                     st.dataframe(df.head(10), use_container_width=True)
-                    
                     with st.spinner("Автоопределение колонок..."):
                         suggestions = mapping_constructor.get_mapping_suggestions(df)
-                    
                     if suggestions:
                         st.subheader("💡 Предложенный маппинг")
-                        
                         suggestion_data = []
                         for s in suggestions:
                             confidence_emoji = (
@@ -7538,12 +7160,9 @@ def render_mapping_constructor_ui() -> None:
                                 'Уровень': s['confidence_level'],
                                 'Причины': '; '.join(s['reasons'])
                             })
-                        
                         suggestion_df = pd.DataFrame(suggestion_data)
                         st.dataframe(suggestion_df, use_container_width=True, hide_index=True)
-                        
                         st.subheader("📊 Уверенность определения")
-                        
                         fig = go.Figure()
                         fig.add_trace(go.Bar(
                             x=[s['target'] for s in suggestions],
@@ -7565,56 +7184,37 @@ def render_mapping_constructor_ui() -> None:
                             height=400
                         )
                         st.plotly_chart(fig, use_container_width=True)
-                        
                         if st.button("✅ Применить предложенный маппинг", type="primary", use_container_width=True):
-                            suppliers = st.session_state.config.suppliers
-                            supplier_names = [s.get('name', 'Unknown') for s in suppliers]
-                            
-                            if supplier_names:
-                                auto_supplier = st.selectbox(
-                                    "Выберите поставщика для применения маппинга",
-                                    supplier_names,
-                                    key="auto_supplier_select"
-                                )
-                                
-                                auto_mapping = {s['target']: s['column'] for s in suggestions}
-                                
-                                if mapping_constructor.save_mapping(
-                                    auto_supplier,
-                                    auto_mapping,
-                                    created_by='auto',
-                                    comment='Автоматически определенный маппинг'
-                                ):
-                                    st.success("✅ Автоматический маппинг применен!")
-                                    st.balloons()
-                                    time.sleep(1)
-                                    st.rerun()
+                            auto_mapping = {s['target']: s['column'] for s in suggestions}
+                            if mapping_constructor.save_mapping(
+                                selected_supplier,
+                                auto_mapping,
+                                created_by='auto',
+                                comment='Автоматически определенный маппинг'
+                            ):
+                                st.success("✅ Автоматический маппинг применен!")
+                                st.balloons()
+                                time.sleep(1)
+                                st.rerun()
                     else:
                         st.warning("⚠️ Не удалось автоматически определить маппинг")
                         st.info("💡 Попробуйте настроить маппинг вручную на вкладке '📤 Загрузка и настройка'")
-            
             except Exception as e:
                 st.error(f"❌ Ошибка: {str(e)}")
-    
-    with tab4:
+    with extra_tab3:
         st.subheader("📋 Шаблоны маппинга")
         st.markdown("Используйте готовые шаблоны для быстрой настройки маппинга.")
-        
         templates = mapping_constructor.mapping_templates
         template_names = list(templates.keys())
-        
         col1, col2 = st.columns([2, 1])
-        
         with col1:
             selected_template = st.selectbox(
                 "Выберите шаблон",
                 template_names,
                 key="template_select_mapping"
             )
-        
         if selected_template:
             template = templates[selected_template]
-            
             template_descriptions = {
                 'standard': 'Стандартный набор полей для большинства поставщиков',
                 'minimal': 'Минимальный набор (только обязательные поля)',
@@ -7624,10 +7224,8 @@ def render_mapping_constructor_ui() -> None:
                 'wildberries': 'Формат Wildberries',
                 '1c_export': 'Формат выгрузки из 1С'
             }
-            
             description = template_descriptions.get(selected_template, 'Пользовательский шаблон')
             st.markdown(f"**{description}**")
-            
             st.write("**Поля шаблона:**")
             template_data = []
             for field, column in template.items():
@@ -7636,43 +7234,27 @@ def render_mapping_constructor_ui() -> None:
                     'Типовая колонка': column,
                     'Обязательное': '✅' if field in ['sku', 'price'] else '❌'
                 })
-            
             st.dataframe(
                 pd.DataFrame(template_data),
                 use_container_width=True,
                 hide_index=True
             )
-            
             with col2:
                 if st.button("📥 Применить шаблон", use_container_width=True, key="apply_template_btn"):
-                    suppliers = st.session_state.config.suppliers
-                    supplier_names = [s.get('name', 'Unknown') for s in suppliers]
-                    
-                    if supplier_names:
-                        template_supplier = st.selectbox(
-                            "Выберите поставщика",
-                            supplier_names,
-                            key="template_supplier_select"
-                        )
-                        
-                        if mapping_constructor.save_mapping(
-                            template_supplier,
-                            template,
-                            created_by='template',
-                            comment=f'Применен шаблон: {selected_template}'
-                        ):
-                            st.success(f"✅ Шаблон '{selected_template}' применен!")
-                            st.balloons()
-                            time.sleep(1)
-                            st.rerun()
-        
+                    if mapping_constructor.save_mapping(
+                        selected_supplier,
+                        template,
+                        created_by='template',
+                        comment=f'Применен шаблон: {selected_template}'
+                    ):
+                        st.success(f"✅ Шаблон '{selected_template}' применен!")
+                        st.balloons()
+                        time.sleep(1)
+                        st.rerun()
         with st.expander("➕ Создать новый шаблон", expanded=False):
             new_template_name = st.text_input("Название нового шаблона", key="new_template_name")
-            
             st.write("Заполните поля шаблона (типовые названия колонок):")
-            
             col1, col2 = st.columns(2)
-            
             with col1:
                 t_sku = st.text_input("SKU", value="Артикул", key="t_sku")
                 t_price = st.text_input("Цена", value="Цена", key="t_price")
@@ -7680,7 +7262,6 @@ def render_mapping_constructor_ui() -> None:
                 t_brand = st.text_input("Бренд", value="Бренд", key="t_brand")
                 t_name = st.text_input("Название", value="Название", key="t_name")
                 t_category = st.text_input("Категория", value="Категория", key="t_category")
-            
             with col2:
                 t_description = st.text_input("Описание", value="Описание", key="t_description")
                 t_barcode = st.text_input("Штрихкод", value="Штрихкод", key="t_barcode")
@@ -7688,7 +7269,6 @@ def render_mapping_constructor_ui() -> None:
                 t_country = st.text_input("Страна", value="Страна", key="t_country")
                 t_warranty = st.text_input("Гарантия", value="Гарантия", key="t_warranty")
                 t_dimensions = st.text_input("Размеры", value="Размеры", key="t_dimensions")
-            
             if st.button("💾 Сохранить шаблон", use_container_width=True, key="save_template_btn"):
                 if new_template_name:
                     new_template = {
@@ -7705,25 +7285,21 @@ def render_mapping_constructor_ui() -> None:
                         'warranty': t_warranty,
                         'dimensions': t_dimensions
                     }
-                    
                     mapping_constructor.mapping_templates[new_template_name] = new_template
                     mapping_constructor.save_templates()
                     st.success(f"✅ Шаблон '{new_template_name}' сохранен!")
                     st.rerun()
                 else:
                     st.error("❌ Введите название шаблона")
-        
         with st.expander("🗑️ Управление пользовательскими шаблонами", expanded=False):
             system_templates = ['standard', 'minimal', 'extended', 'yandex_market', 'ozon', 'wildberries', '1c_export']
             custom_templates = {k: v for k, v in templates.items() if k not in system_templates}
-            
             if custom_templates:
                 template_to_delete = st.selectbox(
                     "Выберите шаблон для удаления",
                     list(custom_templates.keys()),
                     key="delete_template_select"
                 )
-                
                 if st.button("🗑️ Удалить шаблон", type="secondary", use_container_width=True, key="delete_template_btn"):
                     if template_to_delete in mapping_constructor.mapping_templates:
                         del mapping_constructor.mapping_templates[template_to_delete]
@@ -7732,883 +7308,153 @@ def render_mapping_constructor_ui() -> None:
                         st.rerun()
             else:
                 st.info("Нет пользовательских шаблонов")
-    
-    with tab5:
+    with extra_tab4:
         st.subheader("📜 История изменений маппинга")
-        
-        suppliers = st.session_state.config.suppliers
-        supplier_names = [s.get('name', 'Unknown') for s in suppliers]
-        
-        if supplier_names:
-            history_supplier = st.selectbox(
-                "Выберите поставщика",
-                supplier_names,
-                key="history_supplier_select"
-            )
-            
-            if history_supplier:
-                history = st.session_state.config.get_mapping_history(history_supplier)
+        if selected_supplier:
+            history = st.session_state.config.get_mapping_history(selected_supplier)
+            if history:
+                st.markdown(f"**История изменений для поставщика: {selected_supplier}**")
+                st.markdown(f"**Всего версий:** {len(history)}")
+                for record in reversed(history):
+                    with st.expander(
+                        f"📝 Версия {record.get('version', '?')} — "
+                        f"{record.get('created_at', '')[:19]} "
+                        f"({record.get('created_by', 'system')})",
+                        expanded=(record == history[-1])
+                    ):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"**Автор:** {record.get('created_by', 'system')}")
+                        with col2:
+                            st.markdown(f"**Дата:** {record.get('created_at', '')[:19]}")
+                        if record.get('comment'):
+                            st.markdown(f"**Комментарий:** {record['comment']}")
+                        if record.get('changes'):
+                            st.markdown("**Изменения в этой версии:**")
+                            for change in record['changes']:
+                                emoji = {
+                                    'added': '➕',
+                                    'removed': '➖',
+                                    'modified': '✏️'
+                                }.get(change.get('change_type', 'modified'), '•')
+                                st.markdown(
+                                    f"{emoji} **{change['field']}**: "
+                                    f"`{change['old_value']}` → `{change['new_value']}`"
+                                )
+                        if record.get('mapping'):
+                            st.markdown("**Итоговый маппинг:**")
+                            mapped_fields = {k: v for k, v in record['mapping'].items() if v}
+                            if mapped_fields:
+                                mapping_df = pd.DataFrame(
+                                    [{'Поле': k, 'Колонка': v} for k, v in mapped_fields.items()]
+                                )
+                                st.dataframe(mapping_df, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Маппинг пуст")
+            else:
+                st.info(f"История изменений для поставщика '{selected_supplier}' пуста")
+                st.markdown("""
+                💡 **История появляется при сохранении маппинга.**
                 
-                if history:
-                    st.markdown(f"**История изменений для поставщика: {history_supplier}**")
-                    st.markdown(f"**Всего версий:** {len(history)}")
-                    
-                    for record in reversed(history):
-                        with st.expander(
-                            f"📝 Версия {record.get('version', '?')} — "
-                            f"{record.get('created_at', '')[:19]} "
-                            f"({record.get('created_by', 'system')})",
-                            expanded=(record == history[-1])
-                        ):
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.markdown(f"**Автор:** {record.get('created_by', 'system')}")
-                            
-                            with col2:
-                                st.markdown(f"**Дата:** {record.get('created_at', '')[:19]}")
-                            
-                            if record.get('comment'):
-                                st.markdown(f"**Комментарий:** {record['comment']}")
-                            
-                            if record.get('changes'):
-                                st.markdown("**Изменения в этой версии:**")
-                                for change in record['changes']:
-                                    emoji = {
-                                        'added': '➕',
-                                        'removed': '➖',
-                                        'modified': '✏️'
-                                    }.get(change.get('change_type', 'modified'), '•')
-                                    
-                                    st.markdown(
-                                        f"{emoji} **{change['field']}**: "
-                                        f"`{change['old_value']}` → `{change['new_value']}`"
-                                    )
-                            
-                            if record.get('mapping'):
-                                st.markdown("**Итоговый маппинг:**")
-                                mapped_fields = {k: v for k, v in record['mapping'].items() if v}
-                                
-                                if mapped_fields:
-                                    mapping_df = pd.DataFrame(
-                                        [{'Поле': k, 'Колонка': v} for k, v in mapped_fields.items()]
-                                    )
-                                    st.dataframe(mapping_df, use_container_width=True, hide_index=True)
-                                else:
-                                    st.info("Маппинг пуст")
-                else:
-                    st.info(f"История изменений для поставщика '{history_supplier}' пуста")
-                    st.markdown("""
-                    💡 **История появляется при сохранении маппинга.**
-                    
-                    Попробуйте:
-                    1. Загрузить файл прайса
-                    2. Настроить маппинг
-                    3. Сохранить изменения
-                    """)
-        
+                Попробуйте:
+                1. Загрузить файл прайса
+                2. Настроить маппинг
+                3. Сохранить изменения
+                """)
         st.divider()
         st.subheader("📥 Экспорт / Импорт маппинга")
-        
         col1, col2 = st.columns(2)
-        
         with col1:
             st.markdown("**Экспорт маппинга:**")
-            
             export_format = st.selectbox(
                 "Формат экспорта",
                 ['json', 'csv'],
                 key="export_format_select"
             )
-            
-            if supplier_names:
-                export_supplier = st.selectbox(
-                    "Выберите поставщика для экспорта",
-                    supplier_names,
-                    key="export_supplier_select"
-                )
-                
-                if st.button("📤 Экспортировать", use_container_width=True, key="export_mapping_btn"):
-                    current_mapping = st.session_state.config.get_supplier_mapping(export_supplier)
-                    if current_mapping and any(current_mapping.values()):
-                        filepath = mapping_constructor.export_mapping_config(export_supplier, export_format)
-                        if filepath:
-                            with open(filepath, 'rb') as f:
-                                file_data = f.read()
-                            
-                            mime_type = "application/json" if export_format == 'json' else "text/csv"
-                            
-                            st.download_button(
-                                f"📥 Скачать {export_format.upper()}",
-                                file_data,
-                                f"mapping_{export_supplier}.{export_format}",
-                                mime_type,
-                                key="download_exported_mapping"
-                            )
-                    else:
-                        st.warning("⚠️ Нет маппинга для экспорта")
-        
+            if st.button("📤 Экспортировать", use_container_width=True, key="export_mapping_btn"):
+                if current_mapping and any(current_mapping.values()):
+                    filepath = mapping_constructor.export_mapping_config(selected_supplier, export_format)
+                    if filepath:
+                        with open(filepath, 'rb') as f:
+                            file_data = f.read()
+                        mime_type = "application/json" if export_format == 'json' else "text/csv"
+                        st.download_button(
+                            f"📥 Скачать {export_format.upper()}",
+                            file_data,
+                            f"mapping_{selected_supplier}.{export_format}",
+                            mime_type,
+                            key="download_exported_mapping"
+                        )
+                else:
+                    st.warning("⚠️ Нет маппинга для экспорта")
         with col2:
             st.markdown("**Импорт маппинга:**")
-            
             imported_file = st.file_uploader(
                 "Загрузите файл маппинга",
                 type=['json', 'csv'],
                 key="import_mapping_file_uploader"
             )
-            
             if imported_file is not None:
                 temp_dir = Path(st.session_state.config.temp_dir)
                 temp_dir.mkdir(parents=True, exist_ok=True)
                 temp_path = temp_dir / f"import_mapping_{uuid.uuid4().hex}.{imported_file.name.split('.')[-1]}"
-                
                 with open(temp_path, 'wb') as f:
                     f.write(imported_file.read())
-                
                 imported_mapping = mapping_constructor.import_mapping_config(str(temp_path))
-                
                 if imported_mapping:
                     st.success("✅ Маппинг успешно импортирован!")
-                    
                     st.markdown("**Импортированные поля:**")
                     import_df = pd.DataFrame(
                         [{'Поле': k, 'Колонка': v} for k, v in imported_mapping.items()]
                     )
                     st.dataframe(import_df, use_container_width=True, hide_index=True)
-                    
                     col1, col2 = st.columns(2)
-                    
                     with col1:
                         if st.button("✅ Применить импортированный маппинг", type="primary", use_container_width=True, key="apply_imported_mapping_btn"):
-                            suppliers = st.session_state.config.suppliers
-                            supplier_names = [s.get('name', 'Unknown') for s in suppliers]
-                            
-                            if supplier_names:
-                                import_supplier = st.selectbox(
-                                    "Выберите поставщика",
-                                    supplier_names,
-                                    key="import_supplier_select"
-                                )
-                                
-                                if mapping_constructor.save_mapping(
-                                    import_supplier,
-                                    imported_mapping,
-                                    created_by='import',
-                                    comment=f'Импортирован из файла {imported_file.name}'
-                                ):
-                                    st.success("✅ Маппинг применен!")
-                                    st.balloons()
-                                    time.sleep(1)
-                                    st.rerun()
-                    
+                            if mapping_constructor.save_mapping(
+                                selected_supplier,
+                                imported_mapping,
+                                created_by='import',
+                                comment=f'Импортирован из файла {imported_file.name}'
+                            ):
+                                st.success("✅ Маппинг применен!")
+                                st.balloons()
+                                time.sleep(1)
+                                st.rerun()
                     with col2:
                         if st.button("❌ Отменить", use_container_width=True, key="cancel_import_mapping_btn"):
                             st.rerun()
                 else:
                     st.error("❌ Не удалось импортировать маппинг из файла")
-                
                 try:
                     temp_path.unlink(missing_ok=True)
                 except:
                     pass
-        
-        st.divider()
-        with st.expander("🧹 Очистка временных файлов", expanded=False):
-            uploaded_files = mapping_constructor.get_uploaded_files_list()
-            
-            if uploaded_files:
-                st.markdown(f"**Временных файлов:** {len(uploaded_files)}")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    max_age = st.number_input(
-                        "Максимальный возраст (часов)",
-                        value=24,
-                        min_value=1,
-                        max_value=168,
-                        key="max_age_hours_input"
-                    )
-                
-                with col2:
-                    if st.button("🧹 Очистить старые файлы", use_container_width=True, key="cleanup_uploads_btn"):
-                        cleaned = mapping_constructor.cleanup_old_uploads(max_age)
-                        st.success(f"✅ Очищено {cleaned} файлов")
-                        st.rerun()
-            else:
-                st.info("Нет временных файлов")
-
-
-def render_supplier_settings() -> None:
-    """Расширенный интерфейс управления поставщиками"""
-    st.subheader("📋 Управление поставщиками")
-    
-    suppliers = st.session_state.config.suppliers
-    
-    if suppliers:
-        active_count = sum(1 for s in suppliers if s.get('enabled', True))
-        with_mapping = sum(1 for s in suppliers if any(s.get('column_mapping', {}).values()))
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Всего поставщиков", len(suppliers))
-        with col2:
-            st.metric("Активных", active_count)
-        with col3:
-            st.metric("С настроенным маппингом", with_mapping)
-    
-    if suppliers:
-        st.subheader("📋 Список поставщиков")
-        
-        for i, supplier in enumerate(suppliers):
-            with st.expander(
-                f"{'✅' if supplier.get('enabled', True) else '❌'} {supplier.get('name', 'Unknown')}",
-                expanded=False
-            ):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write(f"**Email:** {supplier.get('email', '')}")
-                    st.write(f"**IMAP:** {supplier.get('imap_server', '')}:{supplier.get('imap_port', 993)}")
-                    st.write(f"**Тема:** {supplier.get('subject_filter', '(все)')}")
-                    st.write(f"**Отправитель:** {supplier.get('sender_filter', '(все)')}")
-                
-                with col2:
-                    mapping = supplier.get('column_mapping', {})
-                    if mapping and any(mapping.values()):
-                        st.write("**Маппинг:**")
-                        for field, col in mapping.items():
-                            if col:
-                                st.write(f"  • {field} → `{col}`")
-                    else:
-                        st.warning("⚠️ Маппинг не настроен")
-                    
-                    stats = supplier.get('stats', {})
-                    if stats:
-                        st.write(f"**Успешных синхронизаций:** {stats.get('total_files_processed', 0)}")
-                        st.write(f"**Загружено товаров:** {stats.get('total_products_loaded', 0)}")
-                        success_rate = stats.get('success_rate', 0)
-                        st.progress(success_rate / 100, text=f"Успешность: {success_rate:.1f}%")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if st.button("🔄 Синхронизировать", key=f"sync_{i}", use_container_width=True):
-                        robot = PriceRobot(st.session_state.config, st.session_state.logger)
-                        result = robot.run_single_supplier(supplier.get('name', ''))
-                        if result['status'] == 'success':
-                            st.success(f"✅ Синхронизировано файлов: {result.get('files_processed', 0)}")
-                        else:
-                            st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
-                
-                with col2:
-                    new_enabled = not supplier.get('enabled', True)
-                    if st.button(
-                        "🔴 Деактивировать" if supplier.get('enabled', True) else "🟢 Активировать",
-                        key=f"toggle_{i}",
-                        use_container_width=True
-                    ):
-                        supplier['enabled'] = new_enabled
-                        st.session_state.config._save_suppliers()
-                        st.rerun()
-                
-                with col3:
-                    if st.button("🗑️ Удалить", key=f"delete_{i}", use_container_width=True):
-                        if st.session_state.get(f"confirm_delete_{i}", False):
-                            st.session_state.config.suppliers.pop(i)
-                            st.session_state.config._save_suppliers()
-                            st.success("✅ Поставщик удален")
-                            st.rerun()
-                        else:
-                            st.session_state[f"confirm_delete_{i}"] = True
-                            st.warning("⚠️ Нажмите еще раз для подтверждения удаления")
-    
-    with st.expander("➕ Добавить нового поставщика", expanded=not suppliers):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            new_name = st.text_input("Название поставщика*", key="new_supplier_name")
-            new_email = st.text_input("Email*", key="new_supplier_email")
-            new_password = st.text_input("Пароль*", type="password", key="new_supplier_password")
-            new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key="new_supplier_imap")
-            new_port = st.number_input("IMAP порт", value=993, step=1, key="new_supplier_port")
-        
-        with col2:
-            new_subject = st.text_input("Фильтр по теме", placeholder="прайс", key="new_supplier_subject")
-            new_sender = st.text_input("Фильтр по отправителю", key="new_supplier_sender")
-            new_priority = st.number_input("Приоритет", value=0, step=1, key="new_supplier_priority")
-            new_markup = st.number_input("Индивидуальная наценка (%)", value=0.0, step=0.5, key="new_supplier_markup")
-            new_enabled = st.checkbox("Активен", value=True, key="new_supplier_enabled")
-        
-        if st.button("✅ Добавить поставщика", type="primary", use_container_width=True):
-            if not new_name or not new_email or not new_password:
-                st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
-            else:
-                new_supplier = SupplierConfig(
-                    name=new_name,
-                    email=new_email,
-                    email_password=new_password,
-                    imap_server=new_imap,
-                    imap_port=new_port,
-                    subject_filter=new_subject,
-                    sender_filter=new_sender,
-                    enabled=new_enabled,
-                    priority=new_priority,
-                    custom_markup=new_markup
-                )
-                
-                st.session_state.config.suppliers.append(new_supplier.to_dict())
-                st.session_state.config._save_suppliers()
-                st.success(f"✅ Поставщик {new_name} добавлен!")
-                st.rerun()
-
-
-def render_analysis_tab() -> None:
-    """Расширенный интерфейс аналитики"""
-    st.subheader("📊 Аналитика прайсов поставщиков")
-    
-    if st.button("🚀 Запустить анализ", type="primary", use_container_width=True):
-        if not st.session_state.config.suppliers:
-            st.error("❌ Сначала добавьте поставщиков в настройках")
-        else:
-            run_analysis()
-    
     st.divider()
-    
-    if 'analysis_result' in st.session_state and st.session_state.analysis_result is not None:
-        df = st.session_state.analysis_result
-        
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        
-        with col1:
-            st.metric("📦 Уникальных SKU", len(df))
-        with col2:
-            st.metric("🏷️ Поставщиков", df['best_supplier'].nunique())
-        with col3:
-            st.metric("💰 Средняя цена", f"{df['min_price'].mean():.2f} ₽")
-        with col4:
-            st.metric("⬇️ Мин. цена", f"{df['min_price'].min():.2f} ₽")
-        with col5:
-            st.metric("📊 Медиана", f"{df['median_price'].median():.2f} ₽")
-        with col6:
-            st.metric("💵 Экономия", f"{df['price_diff'].sum():.2f} ₽")
-        
-        st.subheader("🔍 Фильтры")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            search_query = st.text_input("Поиск по SKU", placeholder="Введите артикул...")
-        
-        with col2:
-            suppliers_list = ['Все'] + sorted(df['best_supplier'].unique().tolist())
-            selected_supplier = st.selectbox("Поставщик", suppliers_list)
-        
-        with col3:
-            categories = ['Все'] + sorted(df['category'].dropna().unique().tolist())
-            selected_category = st.selectbox("Категория", categories)
-        
-        with col4:
-            min_diff = st.number_input("Мин. разница цен (%)", value=0.0, step=1.0)
-        
-        filtered_df = df.copy()
-        
-        if search_query:
-            filtered_df = filtered_df[filtered_df['sku'].str.contains(search_query, case=False, na=False)]
-        
-        if selected_supplier != 'Все':
-            filtered_df = filtered_df[filtered_df['best_supplier'] == selected_supplier]
-        
-        if selected_category != 'Все':
-            filtered_df = filtered_df[filtered_df['category'] == selected_category]
-        
-        if min_diff > 0:
-            filtered_df = filtered_df[filtered_df['price_diff_percent'] >= min_diff]
-        
-        st.subheader(f"📋 Результаты ({len(filtered_df)} товаров)")
-        
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 Таблица",
-            "📈 Графики",
-            "🏆 Лучшие предложения",
-            "💡 Арбитраж"
-        ])
-        
-        with tab1:
-            st.dataframe(
-                filtered_df,
-                use_container_width=True,
-                height=600,
-                column_config={
-                    "sku": "Артикул",
-                    "brand": "Бренд",
-                    "name": "Название",
-                    "min_price": st.column_config.NumberColumn("Мин. цена", format="%.2f ₽"),
-                    "best_supplier": "Лучший поставщик",
-                    "price_diff": st.column_config.NumberColumn("Разница", format="%.2f ₽"),
-                    "price_diff_percent": st.column_config.NumberColumn("Разница %", format="%.1f%%"),
-                    "suppliers_count": "Поставщиков"
-                },
-                hide_index=True
-            )
-        
-        with tab2:
+    with st.expander("🧹 Очистка временных файлов", expanded=False):
+        uploaded_files = mapping_constructor.get_uploaded_files_list()
+        if uploaded_files:
+            st.markdown(f"**Временных файлов:** {len(uploaded_files)}")
             col1, col2 = st.columns(2)
-            
             with col1:
-                top_cheap = filtered_df.nsmallest(10, 'min_price')
-                fig = px.bar(
-                    top_cheap,
-                    x='sku',
-                    y='min_price',
-                    title='Топ-10 самых дешевых товаров',
-                    labels={'min_price': 'Цена (₽)', 'sku': 'Артикул'},
-                    color='min_price',
-                    color_continuous_scale='greens'
+                max_age = st.number_input(
+                    "Максимальный возраст (часов)",
+                    value=24,
+                    min_value=1,
+                    max_value=168,
+                    key="max_age_hours_input"
                 )
-                st.plotly_chart(fig, use_container_width=True)
-            
             with col2:
-                fig = px.histogram(
-                    filtered_df,
-                    x='min_price',
-                    title='Распределение цен',
-                    labels={'min_price': 'Цена (₽)'},
-                    nbins=30,
-                    color_discrete_sequence=['blue']
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            supplier_performance = filtered_df['best_supplier'].value_counts().head(10)
-            fig = px.pie(
-                values=supplier_performance.values,
-                names=supplier_performance.index,
-                title='Доля лучших предложений по поставщикам'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with tab3:
-            if st.session_state.analyzer:
-                best_prices = st.session_state.analyzer.get_best_prices_by_category(filtered_df)
-                if not best_prices.empty:
-                    st.dataframe(best_prices, use_container_width=True, hide_index=True)
-                
-                supplier_perf = st.session_state.analyzer.get_supplier_performance(filtered_df)
-                if not supplier_perf.empty:
-                    st.subheader("🏆 Эффективность поставщиков")
-                    st.dataframe(supplier_perf, use_container_width=True, hide_index=True)
-        
-        with tab4:
-            if st.session_state.analyzer:
-                opportunities = st.session_state.analyzer.find_arbitrage_opportunities(
-                    filtered_df, 
-                    min_margin_percent=10.0
-                )
-                
-                if not opportunities.empty:
-                    st.success(f"Найдено {len(opportunities)} возможностей для арбитража")
-                    st.dataframe(
-                        opportunities,
-                        use_container_width=True,
-                        column_config={
-                            "sku": "Артикул",
-                            "buy_from": "Купить у",
-                            "buy_price": st.column_config.NumberColumn("Цена покупки", format="%.2f ₽"),
-                            "sell_price": st.column_config.NumberColumn("Цена продажи", format="%.2f ₽"),
-                            "margin": st.column_config.NumberColumn("Маржа", format="%.2f ₽"),
-                            "margin_percent": st.column_config.NumberColumn("Маржа %", format="%.1f%%")
-                        },
-                        hide_index=True
-                    )
-                else:
-                    st.info("Возможностей для арбитража не найдено (минимальная маржа: 10%)")
-        
-        st.subheader("📥 Экспорт результатов")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("📥 CSV", use_container_width=True):
-                if st.session_state.analyzer:
-                    filepath = st.session_state.analyzer.export_to_csv(filtered_df)
-                    with open(filepath, 'rb') as f:
-                        st.download_button(
-                            "📥 Скачать CSV",
-                            f.read(),
-                            os.path.basename(filepath),
-                            "text/csv"
-                        )
-        
-        with col2:
-            if st.button("📥 Excel", use_container_width=True):
-                if st.session_state.analyzer:
-                    filepath = st.session_state.analyzer.export_to_excel(filtered_df)
-                    with open(filepath, 'rb') as f:
-                        st.download_button(
-                            "📥 Скачать Excel",
-                            f.read(),
-                            os.path.basename(filepath),
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-        
-        with col3:
-            if st.button("📊 Полный отчет", use_container_width=True):
-                if st.session_state.analyzer:
-                    filepath = st.session_state.analyzer.generate_price_report(filtered_df)
-                    with open(filepath, 'rb') as f:
-                        st.download_button(
-                            "📥 Скачать отчет",
-                            f.read(),
-                            os.path.basename(filepath),
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-
-
-def render_dashboard() -> None:
-    """Расширенная панель управления"""
-    st.subheader("📊 Панель управления")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        db_size = os.path.getsize(st.session_state.config.db_path) / (1024 * 1024)
-        st.metric("💾 Размер БД", f"{db_size:.1f} MB")
-    
-    with col2:
-        temp_size = sum(f.stat().st_size for f in Path(st.session_state.config.temp_dir).rglob('*') if f.is_file())
-        st.metric("📁 Временные файлы", f"{temp_size / 1024 / 1024:.1f} MB")
-    
-    with col3:
-        archive_count = len(list(Path(st.session_state.config.archive_dir).glob('*')))
-        st.metric("📦 Файлов в архиве", archive_count)
-    
-    with col4:
-        backup_count = len(list(Path(st.session_state.config.backup_dir).glob('*')))
-        st.metric("💿 Резервных копий", backup_count)
-    
-    st.subheader("📈 Статистика запусков")
-    
-    db = st.session_state.db
-    stats = db.get_stats(30)
-    
-    if not stats.empty:
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        with col1:
-            st.metric("🚀 Всего запусков", len(stats))
-        with col2:
-            st.metric("📁 Обработано файлов", int(stats['files_processed'].sum()))
-        with col3:
-            st.metric("📦 Отправлено товаров", int(stats['offers_sent'].sum()))
-        with col4:
-            st.metric("❌ Всего ошибок", int(stats['errors'].sum()))
-        with col5:
-            avg_time = stats['duration_seconds'].mean()
-            st.metric("⏱️ Среднее время", f"{avg_time:.1f}с")
-        
-        if len(stats) > 1:
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            
-            fig.add_trace(
-                go.Bar(x=stats['run_date'], y=stats['files_processed'], name="Файлы"),
-                secondary_y=False
-            )
-            
-            fig.add_trace(
-                go.Scatter(x=stats['run_date'], y=stats['offers_sent'], name="Товары", mode='lines+markers'),
-                secondary_y=True
-            )
-            
-            fig.update_layout(
-                title='Активность робота',
-                xaxis_title='Дата',
-                height=400
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-    
-    alerts = db.get_unresolved_alerts()
-    if not alerts.empty:
-        st.subheader("⚠️ Системные предупреждения")
-        for _, alert in alerts.head(5).iterrows():
-            severity_color = {
-                'critical': '🔴',
-                'error': '🟠',
-                'warning': '🟡',
-                'info': '🔵'
-            }.get(alert['severity'], '⚪')
-            
-            st.warning(f"{severity_color} **{alert['title']}** - {alert['created_at'][:19]}")
-
-
-def render_settings_sidebar() -> None:
-    """Расширенная боковая панель настроек"""
-    with st.sidebar:
-        st.header("⚙️ Настройки")
-        
-        settings_tab1, settings_tab2, settings_tab3, settings_tab4, settings_tab5 = st.tabs([
-            "📧 Почта", "🏪 Маркет", "📊 Sheets", "💰 Цены", "🔔 Уведомления"
-        ])
-        
-        with settings_tab1:
-            st.text_input("IMAP сервер", key="imap_server", 
-                         value=st.session_state.config.imap_server)
-            st.number_input("IMAP порт", key="imap_port", 
-                          value=st.session_state.config.imap_port, step=1)
-            st.text_input("Email", key="email_user", 
-                         value=st.session_state.config.email_user)
-            st.text_input("Пароль", key="email_pass", 
-                         value=st.session_state.config.email_pass, type="password")
-            st.number_input("Искать за дней", key="email_search_days", 
-                          value=st.session_state.config.email_search_days, step=1)
-            st.number_input("Макс. писем", key="email_max_emails", 
-                          value=st.session_state.config.email_max_emails, step=5)
-            st.checkbox("Помечать прочитанными", key="email_mark_as_read",
-                       value=st.session_state.config.email_mark_as_read)
-        
-        with settings_tab2:
-            st.text_input("OAuth токен", key="yandex_token", 
-                         value=st.session_state.config.yandex_token, type="password")
-            st.number_input("ID кампании", key="campaign_id", 
-                          value=st.session_state.config.campaign_id, step=1)
-            st.number_input("ID склада", key="warehouse_id", 
-                          value=st.session_state.config.warehouse_id, step=1)
-            st.checkbox("Автообновление", key="yandex_auto_update",
-                       value=st.session_state.config.yandex_auto_update)
-        
-        with settings_tab3:
-            st.text_input("ID таблицы", key="google_sheet_id", 
-                         value=st.session_state.config.google_sheet_id)
-            st.text_input("Название листа", key="google_sheet_name", 
-                         value=st.session_state.config.google_sheet_name)
-            
-            if os.path.exists(st.session_state.config.google_credentials_json):
-                st.success(f"✅ Файл ключей найден")
-            else:
-                st.warning(f"⚠️ Файл ключей не найден")
-        
-        with settings_tab4:
-            st.number_input("Наценка (%)", key="markup_percent", 
-                          value=st.session_state.config.markup_percent, step=0.5)
-            st.number_input("Мин. остаток", key="min_stock_threshold", 
-                          value=st.session_state.config.min_stock_threshold, step=1)
-            st.number_input("Товаров в запросе", key="max_offers_per_request", 
-                          value=st.session_state.config.max_offers_per_request, step=50)
-            st.number_input("Потоков", key="max_workers", 
-                          value=st.session_state.config.max_workers, step=1)
-        
-        with settings_tab5:
-            notification_config = st.session_state.config.notification_config
-            st.checkbox("Включить уведомления", key="notifications_enabled",
-                       value=notification_config.get('enabled', False))
-            st.checkbox("Email уведомления", key="email_notifications",
-                       value=notification_config.get('email_notifications', False))
-            st.checkbox("Telegram уведомления", key="telegram_enabled",
-                       value=notification_config.get('telegram_enabled', False))
-        
-        if st.button("💾 Сохранить настройки", use_container_width=True, type="primary"):
-            config = st.session_state.config
-            
-            config.imap_server = st.session_state.imap_server
-            config.imap_port = int(st.session_state.imap_port)
-            config.email_user = st.session_state.email_user
-            config.email_pass = st.session_state.email_pass
-            config.email_search_days = int(st.session_state.email_search_days)
-            config.email_max_emails = int(st.session_state.email_max_emails)
-            config.email_mark_as_read = st.session_state.email_mark_as_read
-            
-            config.yandex_token = st.session_state.yandex_token
-            config.campaign_id = int(st.session_state.campaign_id)
-            config.warehouse_id = int(st.session_state.warehouse_id)
-            config.yandex_auto_update = st.session_state.yandex_auto_update
-            
-            config.google_sheet_id = st.session_state.google_sheet_id
-            config.google_sheet_name = st.session_state.google_sheet_name
-            
-            config.markup_percent = float(st.session_state.markup_percent)
-            config.min_stock_threshold = int(st.session_state.min_stock_threshold)
-            config.max_offers_per_request = int(st.session_state.max_offers_per_request)
-            config.max_workers = int(st.session_state.max_workers)
-            
-            config.notification_config = {
-                'enabled': st.session_state.notifications_enabled,
-                'email_notifications': st.session_state.email_notifications,
-                'telegram_enabled': st.session_state.telegram_enabled
-            }
-            
-            save_config()
-            st.rerun()
-        
-        st.divider()
-        
-        if st.session_state.is_running:
-            st.warning("🔄 Робот выполняется...")
-            st.progress(st.session_state.progress_value / 100)
-            st.info(f"📌 {st.session_state.progress_message}")
-            
-            if st.button("⏹️ Остановить", use_container_width=True):
-                st.session_state.is_running = False
-                st.rerun()
+                if st.button("🧹 Очистить старые файлы", use_container_width=True, key="cleanup_uploads_btn"):
+                    cleaned = mapping_constructor.cleanup_old_uploads(max_age)
+                    st.success(f"✅ Очищено {cleaned} файлов")
+                    st.rerun()
         else:
-            if st.button("🚀 Запустить робота", use_container_width=True, type="primary"):
-                run_robot()
-                st.rerun()
-        
-        with st.expander("🔧 Системные действия"):
-            if st.button("🧹 Очистить временные файлы", use_container_width=True):
-                if st.session_state.robot:
-                    cleaned = st.session_state.robot.cleanup_temp_files()
-                    st.success(f"Очищено {cleaned} файлов")
-                else:
-                    robot = PriceRobot(st.session_state.config, st.session_state.logger)
-                    cleaned = robot.cleanup_temp_files()
-                    st.success(f"Очищено {cleaned} файлов")
-            
-            if st.button("💿 Создать бэкап БД", use_container_width=True):
-                if st.session_state.robot:
-                    backup_path = st.session_state.robot.backup_database()
-                else:
-                    robot = PriceRobot(st.session_state.config, st.session_state.logger)
-                    backup_path = robot.backup_database()
-                st.success(f"Бэкап создан: {backup_path}")
-            
-            if st.button("🔄 Обновить данные из Sheets", use_container_width=True):
-                if st.session_state.product_db:
-                    st.session_state.product_db.refresh_data()
-                    st.success("Данные обновлены")
-
-
-def render_products_tab() -> None:
-    """Вкладка базы товаров"""
-    st.subheader("📦 База товаров (Google Sheets)")
-    
-    if st.session_state.product_db is None:
-        st.error("❌ Не удалось подключиться к Google Sheets")
-    else:
-        df = st.session_state.product_db.get_all_products()
-        
-        if df.empty:
-            st.warning("База товаров пуста")
-        else:
-            stats = st.session_state.product_db.get_stats()
-            
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                st.metric("📦 Всего", stats['total_products'])
-            with col2:
-                st.metric("🏷️ Брендов", stats['total_brands'])
-            with col3:
-                st.metric("💰 Средняя цена", f"{stats['avg_price']:.0f} ₽")
-            with col4:
-                st.metric("📦 В наличии", stats['products_with_stock'])
-            with col5:
-                st.metric("💵 Общая стоимость", f"{stats['total_value']:,.0f} ₽")
-            
-            if st.session_state.config.google_sheet_id:
-                st.markdown(
-                    f"🔗 [Открыть Google Sheets](https://docs.google.com/spreadsheets/d/"
-                    f"{st.session_state.config.google_sheet_id})"
-                )
-            
-            search_query = st.text_input("🔍 Поиск по базе", 
-                                       placeholder="Введите артикул, бренд или название...")
-            
-            if search_query:
-                df = st.session_state.product_db.search_products(search_query)
-                st.write(f"Найдено: {len(df)} товаров")
-            
-            st.dataframe(
-                df,
-                use_container_width=True,
-                column_config={
-                    "артикул": "Артикул",
-                    "бренд": "Бренд",
-                    "название": "Название",
-                    "цена_розница": st.column_config.NumberColumn("Цена", format="%.2f ₽"),
-                    "остаток": "Остаток",
-                    "категория": "Категория"
-                },
-                height=500,
-                hide_index=True
-            )
-            
-            if st.button("📥 Экспортировать базу в Excel"):
-                filepath = st.session_state.product_db.export_to_excel()
-                with open(filepath, 'rb') as f:
-                    st.download_button(
-                        "📥 Скачать Excel",
-                        f.read(),
-                        os.path.basename(filepath),
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-
-
-def render_logs_tab() -> None:
-    """Вкладка логов"""
-    st.subheader("📝 Логи выполнения")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        log_level_filter = st.selectbox(
-            "Уровень",
-            ['ALL', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'SUCCESS', 'DEBUG'],
-            key="log_level_filter"
-        )
-    
-    with col2:
-        log_count = st.number_input("Количество", value=100, step=50, key="log_count")
-    
-    with col3:
-        log_search = st.text_input("Поиск в логах", key="log_search")
-    
-    log_container = st.container(height=500)
-    
-    with log_container:
-        logs = st.session_state.logger.get_logs(log_count)
-        
-        if log_level_filter != 'ALL':
-            logs = [log for log in logs if log['level'] == log_level_filter]
-        
-        if log_search:
-            logs = [log for log in logs if log_search.lower() in log['message'].lower()]
-        
-        for log in logs:
-            level = log['level']
-            message = log['message']
-            timestamp = log['timestamp'][:19]
-            
-            if level in ['ERROR', 'CRITICAL']:
-                st.error(f"[{timestamp}] {message}")
-            elif level == 'WARNING':
-                st.warning(f"[{timestamp}] {message}")
-            elif level == 'SUCCESS':
-                st.success(f"[{timestamp}] {message}")
-            elif level == 'DEBUG':
-                st.caption(f"[{timestamp}] {message}")
-            else:
-                st.info(f"[{timestamp}] {message}")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("📥 Экспорт логов (JSON)", use_container_width=True):
-            filepath = st.session_state.logger.export_logs('json')
-            with open(filepath, 'rb') as f:
-                st.download_button(
-                    "📥 Скачать JSON",
-                    f.read(),
-                    os.path.basename(filepath),
-                    "application/json"
-                )
-    
-    with col2:
-        if st.button("🔄 Обновить логи", use_container_width=True):
-            st.rerun()
+            st.info("Нет временных файлов")
 
 
 def render_main_content() -> None:
-    """Основное содержимое страницы"""
+    """Основное содержимое страницы - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
     st.markdown("""
         <style>
         .main-header {
@@ -8625,13 +7471,9 @@ def render_main_content() -> None:
         }
         </style>
     """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="main-header">🤖 Робот для загрузки и анализа прайсов v11.0</div>', 
-               unsafe_allow_html=True)
-    
+    st.markdown('<div class="main-header">🤖 Робот для загрузки и анализа прайсов v11.0</div>', unsafe_allow_html=True)
     if st.session_state.result:
         result = st.session_state.result
-        
         status_emoji = {
             'success': '✅',
             'no_files': 'ℹ️',
@@ -8639,9 +7481,7 @@ def render_main_content() -> None:
             'failed': '❌',
             'critical_failed': '💥'
         }
-        
         emoji = status_emoji.get(result['status'], '❓')
-        
         if result['status'] == 'success':
             st.success(f"{emoji} Робот успешно выполнил задачу!")
         elif result['status'] == 'no_files':
@@ -8650,7 +7490,6 @@ def render_main_content() -> None:
             st.warning(f"{emoji} Робот выполнен с предупреждениями")
         else:
             st.error(f"{emoji} Робот выполнен с ошибками")
-        
         cols = st.columns(8)
         metrics = [
             ("📁 Файлов", result.get('files_processed', 0)),
@@ -8662,21 +7501,17 @@ def render_main_content() -> None:
             ("⏱️ Время", f"{result.get('duration', 0):.1f}с"),
             ("❌ Ошибок", len(result.get('errors', [])))
         ]
-        
         for col, (label, value) in zip(cols, metrics):
             with col:
                 st.metric(label, value)
-        
         if result.get('errors'):
             with st.expander(f"❌ Ошибки ({len(result['errors'])})", expanded=len(result['errors']) > 0):
                 for error in result['errors']:
                     st.error(f"• {error}")
-        
         if result.get('warnings'):
             with st.expander(f"⚠️ Предупреждения ({len(result['warnings'])})"):
                 for warning in result['warnings']:
                     st.warning(f"• {warning}")
-    
     main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
         "📊 Панель управления",
         "📊 Аналитика прайсов",
@@ -8684,25 +7519,18 @@ def render_main_content() -> None:
         "📦 База товаров",
         "📝 Логи"
     ])
-    
     with main_tab1:
         render_dashboard()
-    
     with main_tab2:
         analysis_subtab1, analysis_subtab2 = st.tabs(["📊 Анализ цен", "⚙️ Поставщики"])
-        
         with analysis_subtab1:
             render_analysis_tab()
-        
         with analysis_subtab2:
             render_supplier_settings()
-    
     with main_tab3:
         render_mapping_constructor_ui()
-    
     with main_tab4:
         render_products_tab()
-    
     with main_tab5:
         render_logs_tab()
 
