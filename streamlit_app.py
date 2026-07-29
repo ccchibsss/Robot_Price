@@ -13,6 +13,7 @@
 + МНОГОУРОВНЕВОЕ КЭШИРОВАНИЕ
 + ОПТИМИЗИРОВАННАЯ ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА
 + МОНИТОРИНГ И СТАТИСТИКА В РЕАЛЬНОМ ВРЕМЕНИ
++ ЛОКАЛЬНАЯ ЗАГРУЗКА ПРАЙСОВ
 ВЕРСИЯ 11.0 - ПОЛНЫЙ МОНОЛИТ С РАСШИРЕННЫМ ФУНКЦИОНАЛОМ
 НИКАКИХ СОКРАЩЕНИЙ - 100% ПОЛНЫЙ КОД
 """
@@ -50,12 +51,12 @@ import uuid
 import random
 import string
 import secrets
-import hashlib
 import functools
 import itertools
 import operator
 import math
 import statistics
+import socket
 from io import BytesIO, StringIO
 from pathlib import Path
 from datetime import datetime, timedelta, date
@@ -283,19 +284,18 @@ class SupplierConfig:
     sender_filter: str = ''
     enabled: bool = True
     last_sync: Optional[str] = None
-    priority: int = 0  # Приоритет поставщика (выше = важнее)
-    auto_apply_markup: bool = False  # Автоматически применять наценку
-    custom_markup: float = 0.0  # Индивидуальная наценка
-    min_order_amount: float = 0.0  # Минимальная сумма заказа
-    delivery_days: int = 0  # Срок доставки в днях
-    payment_terms: str = ''  # Условия оплаты
-    contact_person: str = ''  # Контактное лицо
-    contact_phone: str = ''  # Телефон
-    notes: str = ''  # Заметки
-    rating: float = 0.0  # Рейтинг поставщика (0-5)
-    last_quality_check: Optional[str] = None  # Дата последней проверки качества
+    priority: int = 0
+    auto_apply_markup: bool = False
+    custom_markup: float = 0.0
+    min_order_amount: float = 0.0
+    delivery_days: int = 0
+    payment_terms: str = ''
+    contact_person: str = ''
+    contact_phone: str = ''
+    notes: str = ''
+    rating: float = 0.0
+    last_quality_check: Optional[str] = None
     
-    # Маппинг колонок (сохраняется после настройки)
     column_mapping: Dict[str, str] = field(default_factory=lambda: {
         'sku': '',
         'price': '',
@@ -312,30 +312,27 @@ class SupplierConfig:
         'min_order_qty': ''
     })
     
-    # Дополнительные правила обработки
     processing_rules: Dict[str, Any] = field(default_factory=lambda: {
-        'skip_rows': 0,  # Пропустить первые N строк
-        'skip_empty_rows': True,  # Пропускать пустые строки
-        'price_multiplier': 1.0,  # Множитель цены
-        'stock_formula': '',  # Формула расчета остатка
-        'price_rounding': 2,  # Округление цены
-        'currency_conversion': 1.0,  # Конвертация валюты
-        'min_price_threshold': 0,  # Минимальная допустимая цена
-        'max_price_threshold': 999999999,  # Максимальная допустимая цена
-        'min_stock_threshold': 0,  # Минимальный остаток
-        'deduplicate_by': 'sku',  # Дедупликация по полю
+        'skip_rows': 0,
+        'skip_empty_rows': True,
+        'price_multiplier': 1.0,
+        'stock_formula': '',
+        'price_rounding': 2,
+        'currency_conversion': 1.0,
+        'min_price_threshold': 0,
+        'max_price_threshold': 999999999,
+        'min_stock_threshold': 0,
+        'deduplicate_by': 'sku',
         'validation_rules': {
-            'check_sku_format': True,  # Проверка формата SKU
-            'check_price_range': True,  # Проверка диапазона цен
-            'check_stock_positive': True,  # Проверка положительного остатка
-            'check_brand_required': False  # Бренд обязателен
+            'check_sku_format': True,
+            'check_price_range': True,
+            'check_stock_positive': True,
+            'check_brand_required': False
         }
     })
     
-    # Пример данных для отображения
     sample_data: List[Dict] = field(default_factory=list)
     
-    # Статистика поставщика
     stats: Dict[str, Any] = field(default_factory=lambda: {
         'total_files_processed': 0,
         'total_products_loaded': 0,
@@ -353,11 +350,9 @@ class SupplierConfig:
     @classmethod
     def from_dict(cls, data: Dict) -> 'SupplierConfig':
         """Создание из словаря с обратной совместимостью"""
-        # Удаляем неизвестные поля для обратной совместимости
         known_fields = {f.name for f in fields(cls)}
         filtered_data = {k: v for k, v in data.items() if k in known_fields}
         
-        # Добавляем значения по умолчанию для новых полей
         instance = cls()
         for field_info in fields(cls):
             if field_info.name not in filtered_data:
@@ -400,29 +395,25 @@ class SupplierConfig:
 @dataclass
 class Config:
     """Расширенный класс конфигурации приложения с новыми возможностями"""
-    # Версия конфигурации для миграций
     config_version: int = 2
     
-    # Почтовые настройки (главный ящик)
     imap_server: str = 'imap.mail.ru'
     imap_port: int = 993
     email_user: str = ''
     email_pass: str = ''
     email_search_days: int = 1
     email_max_emails: int = 50
-    email_mark_as_read: bool = False  # Помечать письма как прочитанные
-    email_delete_after_processing: bool = False  # Удалять письма после обработки
-    email_ssl_verify: bool = True  # Проверка SSL сертификата
+    email_mark_as_read: bool = False
+    email_delete_after_processing: bool = False
+    email_ssl_verify: bool = True
     
-    # Настройки Яндекс Маркета
     yandex_token: str = ''
     campaign_id: int = 0
     warehouse_id: int = 0
     yandex_api_url: str = 'https://api.partner.market.yandex.ru'
-    yandex_auto_update: bool = True  # Автоматически обновлять на маркете
-    yandex_update_interval_minutes: int = 60  # Интервал обновления
+    yandex_auto_update: bool = True
+    yandex_update_interval_minutes: int = 60
     
-    # Настройки Google Sheets
     google_sheet_id: str = ''
     google_sheet_name: str = 'Товары'
     google_credentials_json: str = 'google_credentials.json'
@@ -431,32 +422,27 @@ class Config:
         'https://www.googleapis.com/auth/drive',
         'https://www.googleapis.com/auth/spreadsheets'
     ])
-    google_auto_backup: bool = True  # Автоматическое резервное копирование
-    google_backup_interval_hours: int = 24  # Интервал резервного копирования
+    google_auto_backup: bool = True
+    google_backup_interval_hours: int = 24
     
-    # Настройки обработки
     markup_percent: float = 20.0
     min_stock_threshold: int = 1
     max_offers_per_request: int = 500
     request_timeout: int = 30
     retry_count: int = 3
     retry_delay: int = 5
-    retry_backoff_multiplier: float = 2.0  # Множитель задержки при повторных попытках
+    retry_backoff_multiplier: float = 2.0
     
-    # Настройки параллельной обработки
-    max_workers: int = 4  # Максимальное количество потоков
-    parallel_downloads: bool = True  # Параллельная загрузка
-    parallel_parsing: bool = True  # Параллельный парсинг
-    chunk_size: int = 1000  # Размер чанка для обработки
+    max_workers: int = 4
+    parallel_downloads: bool = True
+    parallel_parsing: bool = True
+    chunk_size: int = 1000
     
-    # Поставщики (хранятся с маппингом)
     suppliers: List[Dict] = field(default_factory=list)
     suppliers_file: str = 'suppliers.json'
     
-    # Настройки уведомлений
     notification_config: Dict = field(default_factory=lambda: NotificationConfig().to_dict())
     
-    # Пути к файлам
     db_path: str = 'robot_data.db'
     log_path: str = 'robot.log'
     uploads_dir: str = 'uploads'
@@ -470,7 +456,6 @@ class Config:
     reports_dir: str = 'reports'
     exports_dir: str = 'exports'
     
-    # Глобальный маппинг (для автоопределения) - расширенный
     column_mapping: Dict[str, List[str]] = field(default_factory=lambda: {
         'sku': ['артикул', 'sku', 'код', 'id', 'номер', 'article', 'artikul', 'vendor_code', 'product_id', 'item_id', 'код_товара', 'ид', 'арт', 'art', 'code', 'product_code'],
         'price': ['цена', 'price', 'cost', 'розница', 'розничная', 'розничная цена', 'цена_розница', 'цена_розн', 'retail_price', 'selling_price', 'sales_price', 'стоимость', 'прайс', 'ценарозн'],
@@ -486,7 +471,6 @@ class Config:
         'warranty': ['гарантия', 'warranty', 'срок гарантии', 'guarantee']
     })
     
-    # Настройки валидации
     validation_config: Dict = field(default_factory=lambda: {
         'max_sku_length': 100,
         'min_price': 0.01,
@@ -523,7 +507,6 @@ class Config:
                 backup_path = os.path.join(self.backup_dir, backup_filename)
                 shutil.copy2(self.config_json, backup_path)
                 
-                # Удаляем старые бэкапы (оставляем последние 10)
                 backup_files = sorted(Path(self.backup_dir).glob(f"{self.config_json}.*.bak"))
                 if len(backup_files) > 10:
                     for old_backup in backup_files[:-10]:
@@ -545,7 +528,6 @@ class Config:
     def _save_suppliers(self) -> None:
         """Сохраняет список поставщиков с маппингом в отдельный файл"""
         try:
-            # Создаем бэкап перед сохранением
             if os.path.exists(self.suppliers_file):
                 backup_file = f"{self.suppliers_file}.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
                 shutil.copy2(self.suppliers_file, backup_file)
@@ -563,7 +545,6 @@ class Config:
                 with open(self.suppliers_file, 'r', encoding='utf-8') as f:
                     self.suppliers = json.load(f)
                     
-                # Обеспечиваем обратную совместимость с новыми полями
                 updated_suppliers = []
                 for supplier_data in self.suppliers:
                     supplier = SupplierConfig.from_dict(supplier_data)
@@ -586,12 +567,10 @@ class Config:
         """Устанавливает маппинг колонок для поставщика с сохранением истории"""
         for i, supplier in enumerate(self.suppliers):
             if supplier.get('name') == supplier_name:
-                # Сохраняем старый маппинг в историю
                 old_mapping = supplier.get('column_mapping', {})
                 if old_mapping and old_mapping != mapping:
                     self._save_mapping_history(supplier_name, old_mapping, mapping, created_by, comment)
                 
-                # Обновляем маппинг
                 supplier['column_mapping'] = mapping
                 self._save_suppliers()
                 return True
@@ -606,16 +585,13 @@ class Config:
             
             history_file = history_dir / f"{supplier_name}_mapping_history.json"
             
-            # Загружаем существующую историю
             history = []
             if history_file.exists():
                 with open(history_file, 'r', encoding='utf-8') as f:
                     history = json.load(f)
             
-            # Определяем следующую версию
             next_version = len(history) + 1
             
-            # Создаем запись в истории
             history_record = MappingHistory(
                 supplier_name=supplier_name,
                 mapping=new_mapping,
@@ -624,7 +600,6 @@ class Config:
                 version=next_version
             )
             
-            # Добавляем информацию об изменениях
             changes = []
             for key in set(list(old_mapping.keys()) + list(new_mapping.keys())):
                 old_value = old_mapping.get(key, '')
@@ -640,7 +615,6 @@ class Config:
             history_record_dict['changes'] = changes
             history.append(history_record_dict)
             
-            # Сохраняем историю
             with open(history_file, 'w', encoding='utf-8') as f:
                 json.dump(history, f, ensure_ascii=False, indent=2, default=str)
                 
@@ -682,12 +656,10 @@ class Config:
                 with open(config.config_json, 'r', encoding='utf-8') as f:
                     config_dict = json.load(f)
                 
-                # Миграция конфигурации при необходимости
                 config_version = config_dict.get('config_version', 1)
                 if config_version < 2:
                     config_dict = cls._migrate_config_v1_to_v2(config_dict)
                 
-                # Применяем настройки
                 for key, value in config_dict.items():
                     if hasattr(config, key):
                         setattr(config, key, value)
@@ -703,7 +675,6 @@ class Config:
     @classmethod
     def _migrate_config_v1_to_v2(cls, config_dict: Dict) -> Dict:
         """Миграция конфигурации с версии 1 на версию 2"""
-        # Добавляем новые поля с значениями по умолчанию
         config_dict['config_version'] = 2
         config_dict.setdefault('notification_config', NotificationConfig().to_dict())
         config_dict.setdefault('validation_config', Config().validation_config)
@@ -711,7 +682,6 @@ class Config:
         config_dict.setdefault('parallel_downloads', True)
         config_dict.setdefault('parallel_parsing', True)
         
-        # Обновляем column_mapping для новых полей
         if 'column_mapping' in config_dict:
             default_mapping = Config().column_mapping
             for key, values in default_mapping.items():
@@ -729,12 +699,12 @@ class StreamlitLogger:
     """Расширенный класс для логирования с поддержкой уровней и форматирования"""
     
     LOG_COLORS = {
-        LogLevel.DEBUG: '#808080',      # Серый
-        LogLevel.INFO: '#0000FF',       # Синий
-        LogLevel.WARNING: '#FFA500',    # Оранжевый
-        LogLevel.ERROR: '#FF0000',      # Красный
-        LogLevel.CRITICAL: '#8B0000',   # Темно-красный
-        LogLevel.SUCCESS: '#00FF00'     # Зеленый
+        LogLevel.DEBUG: '#808080',
+        LogLevel.INFO: '#0000FF',
+        LogLevel.WARNING: '#FFA500',
+        LogLevel.ERROR: '#FF0000',
+        LogLevel.CRITICAL: '#8B0000',
+        LogLevel.SUCCESS: '#00FF00'
     }
     
     def __init__(self, max_logs: int = 2000, max_file_size_mb: int = 10, 
@@ -809,7 +779,6 @@ class StreamlitLogger:
             if len(self.logs) > self.max_logs:
                 self.logs = self.logs[-self.max_logs:]
         
-        # Форматируем для файла
         context_str = f" | Context: {json.dumps(context, ensure_ascii=False)}" if context else ""
         file_entry = f"[{timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] [{level.name:8s}] {message}{context_str}"
         
@@ -995,7 +964,6 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Таблица для хранения метаданных файлов
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS file_metadata (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1011,7 +979,6 @@ class Database:
                 )
             ''')
             
-            # Таблица для истории уведомлений
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS notification_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1032,10 +999,8 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Включаем поддержку внешних ключей
             cursor.execute("PRAGMA foreign_keys = ON")
             
-            # Таблица обработанных файлов (расширенная)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS processed_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1061,13 +1026,11 @@ class Database:
                 )
             ''')
             
-            # Индексы для ускорения запросов
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_hash ON processed_files(file_hash)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_supplier ON processed_files(supplier)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_processed_at ON processed_files(processed_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_status ON processed_files(status)')
             
-            # Таблица истории аналитики (расширенная)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS analysis_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1093,7 +1056,6 @@ class Database:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_date ON analysis_history(run_date)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_id ON analysis_history(analysis_id)')
             
-            # Таблица ценовых сравнений (расширенная)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS price_comparisons (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1119,7 +1081,6 @@ class Database:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_comparisons_analysis ON price_comparisons(analysis_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_comparisons_supplier ON price_comparisons(supplier)')
             
-            # Таблица истории цен (расширенная)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS price_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1141,7 +1102,6 @@ class Database:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_history_date ON price_history(updated_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_history_supplier ON price_history(supplier)')
             
-            # Таблица статистики запусков (расширенная)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS run_stats (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1168,7 +1128,6 @@ class Database:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_stats_date ON run_stats(run_date)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_stats_status ON run_stats(status)')
             
-            # Таблица кэша отправленных офферов (расширенная)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS sent_offers_cache (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1184,7 +1143,6 @@ class Database:
             ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_cache_sku ON sent_offers_cache(sku)')
             
-            # Таблица для хранения конфигураций маппинга
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS mapping_configs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1200,7 +1158,6 @@ class Database:
             ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_mapping_supplier ON mapping_configs(supplier_name)')
             
-            # Таблица для алертов и уведомлений
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1354,7 +1311,6 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Получаем текущие данные для истории
             current = self.get_sent_cache(sku)
             price_history = []
             if current:
@@ -1505,10 +1461,8 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Размер базы данных
             stats['db_size_mb'] = os.path.getsize(self.db_path) / (1024 * 1024)
             
-            # Количество записей в основных таблицах
             tables = ['processed_files', 'analysis_history', 'price_comparisons',
                      'price_history', 'run_stats', 'sent_offers_cache', 'alerts']
             
@@ -1516,7 +1470,6 @@ class Database:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                 stats[f'{table}_count'] = cursor.fetchone()[0]
             
-            # Статистика по статусам
             cursor.execute("SELECT status, COUNT(*) FROM processed_files GROUP BY status")
             stats['file_statuses'] = dict(cursor.fetchall())
             
@@ -1524,6 +1477,8 @@ class Database:
             stats['run_statuses'] = dict(cursor.fetchall())
         
         return stats
+
+
 # ===================================================================
 # БЛОК 6: РАСШИРЕННАЯ ТОВАРНАЯ БАЗА В GOOGLE SHEETS
 # ===================================================================
@@ -1543,7 +1498,7 @@ class GoogleSheetsDatabase:
         self.df: Optional[pd.DataFrame] = None
         self.last_backup_time: Optional[datetime] = None
         self.cache: Dict[str, Any] = {}
-        self.cache_ttl = 300  # 5 минут кэширования
+        self.cache_ttl = 300
         self._connect()
         self._load_data()
     
@@ -1565,7 +1520,6 @@ class GoogleSheetsDatabase:
             
             self.client = gspread.authorize(creds)
             
-            # Проверяем подключение
             if self.config.google_sheet_id:
                 try:
                     test_sheet = self.client.open_by_key(self.config.google_sheet_id)
@@ -1618,7 +1572,6 @@ class GoogleSheetsDatabase:
             self.logger.success(f"Создана новая таблица: {spreadsheet.id}")
             self.sheet = spreadsheet
             
-            # Создаем лист с товарами
             self._create_default_sheet()
             
         except Exception as e:
@@ -1627,7 +1580,6 @@ class GoogleSheetsDatabase:
     def _load_data(self) -> None:
         """Расширенная загрузка данных из Google Sheets с кэшированием"""
         try:
-            # Проверяем кэш
             cache_key = f"gs_data_{self.config.google_sheet_id}_{self.config.google_sheet_name}"
             if cache_key in self.cache:
                 cache_time, cached_data = self.cache[cache_key]
@@ -1658,7 +1610,6 @@ class GoogleSheetsDatabase:
             
             self.df = pd.DataFrame(rows, columns=headers)
             
-            # Сохраняем в кэш
             self.cache[cache_key] = (time.time(), self.df.copy())
             
             self._validate_and_fix()
@@ -1682,7 +1633,6 @@ class GoogleSheetsDatabase:
         
         changes_made = False
         
-        # Проверяем обязательные колонки
         missing = [col for col in self.REQUIRED_COLUMNS if col not in self.df.columns]
         if missing:
             for col in missing:
@@ -1690,50 +1640,41 @@ class GoogleSheetsDatabase:
             changes_made = True
             self.logger.warning(f"Добавлены отсутствующие колонки: {missing}")
         
-        # Добавляем опциональные колонки если их нет
         for col in self.OPTIONAL_COLUMNS:
             if col not in self.df.columns:
                 self.df[col] = ''
                 changes_made = True
         
-        # Очистка и нормализация данных
         self.df['артикул'] = self.df['артикул'].astype(str).str.strip().str.upper()
         self.df = self.df[self.df['артикул'] != '']
         
-        # Удаляем дубликаты
         duplicates = self.df['артикул'].duplicated()
         if duplicates.any():
             self.logger.warning(f"Найдено {duplicates.sum()} дубликатов артикулов")
             self.df = self.df.drop_duplicates(subset=['артикул'], keep='first')
             changes_made = True
         
-        # Нормализация цен
         self.df['цена_базовая'] = pd.to_numeric(self.df['цена_базовая'], errors='coerce').fillna(0)
         self.df['цена_розница'] = pd.to_numeric(self.df['цена_розница'], errors='coerce').fillna(self.df['цена_базовая'])
         
-        # Если розничная цена равна 0, устанавливаем её равной базовой с наценкой
         zero_retail_mask = self.df['цена_розница'] == 0
         if zero_retail_mask.any():
             self.df.loc[zero_retail_mask, 'цена_розница'] = self.df.loc[zero_retail_mask, 'цена_базовая'] * (1 + self.config.markup_percent / 100)
             changes_made = True
         
-        # Нормализация остатков
         self.df['остаток'] = pd.to_numeric(self.df['остаток'], errors='coerce').fillna(0).astype(int)
         
-        # Исправляем отрицательные остатки
         negative_stock = self.df['остаток'] < 0
         if negative_stock.any():
             self.logger.warning(f"Исправлено {negative_stock.sum()} отрицательных остатков")
             self.df.loc[negative_stock, 'остаток'] = 0
             changes_made = True
         
-        # Заполняем пустые текстовые поля
         text_columns = ['бренд', 'название', 'категория', 'описание', 'страна', 'гарантия']
         for col in text_columns:
             if col in self.df.columns:
                 self.df[col] = self.df[col].fillna('').astype(str).str.strip()
         
-        # Нормализация числовых полей
         numeric_columns = ['вес']
         for col in numeric_columns:
             if col in self.df.columns:
@@ -1751,20 +1692,17 @@ class GoogleSheetsDatabase:
             sheet = self.client.open_by_key(self.config.google_sheet_id)
             
             try:
-                # Удаляем существующий лист если есть
                 worksheet = sheet.worksheet(self.config.google_sheet_name)
                 sheet.del_worksheet(worksheet)
             except:
                 pass
             
-            # Создаем новый лист
             worksheet = sheet.add_worksheet(
                 self.config.google_sheet_name, 
                 rows=1000, 
                 cols=len(self.REQUIRED_COLUMNS) + len(self.OPTIONAL_COLUMNS) + 5
             )
             
-            # Добавляем заголовки с форматированием
             headers = self.REQUIRED_COLUMNS + self.OPTIONAL_COLUMNS + ['дата_обновления', 'источник']
             header_range = worksheet.range(1, 1, 1, len(headers))
             
@@ -1773,14 +1711,12 @@ class GoogleSheetsDatabase:
             
             worksheet.update_cells(header_range)
             
-            # Форматируем заголовки
             worksheet.format('A1:Z1', {
                 'backgroundColor': {'red': 0.2, 'green': 0.6, 'blue': 0.8},
                 'textFormat': {'bold': True, 'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}},
                 'horizontalAlignment': 'CENTER'
             })
             
-            # Добавляем примеры товаров
             sample_data = [
                 ['SKU001', 1000.00, 'Apple', 'iPhone 15 Pro', 1300.00, 10, 'Смартфоны', 
                  'Новейший смартфон Apple', 0.2, '15x7x0.8', '1234567890123', 'Китай', '12 месяцев',
@@ -1817,7 +1753,6 @@ class GoogleSheetsDatabase:
             if self.df is None or self.df.empty:
                 return
             
-            # Создаем бэкап если нужно
             if self.config.google_auto_backup:
                 if self.last_backup_time is None or \
                    (datetime.now() - self.last_backup_time).total_seconds() > self.config.google_backup_interval_hours * 3600:
@@ -1825,14 +1760,11 @@ class GoogleSheetsDatabase:
             
             worksheet = self.sheet.worksheet(self.config.google_sheet_name)
             
-            # Очищаем лист (кроме заголовков)
             worksheet.clear()
             
-            # Подготавливаем данные для записи
             headers = list(self.df.columns)
             worksheet.append_row(headers)
             
-            # Записываем данные чанками для производительности
             chunk_size = 100
             for start_idx in range(0, len(self.df), chunk_size):
                 end_idx = min(start_idx + chunk_size, len(self.df))
@@ -1843,7 +1775,6 @@ class GoogleSheetsDatabase:
                     row_values = []
                     for col in headers:
                         value = row[col]
-                        # Конвертируем специальные типы
                         if isinstance(value, (datetime, date)):
                             value = value.strftime('%Y-%m-%d %H:%M:%S')
                         elif isinstance(value, (np.integer,)):
@@ -1857,10 +1788,8 @@ class GoogleSheetsDatabase:
                         row_values.append(str(value))
                     rows_data.append(row_values)
                 
-                # Добавляем данные
                 worksheet.append_rows(rows_data)
             
-            # Обновляем кэш
             cache_key = f"gs_data_{self.config.google_sheet_id}_{self.config.google_sheet_name}"
             self.cache[cache_key] = (time.time(), self.df.copy())
             
@@ -1874,7 +1803,6 @@ class GoogleSheetsDatabase:
     
     def _handle_api_error(self, error: Exception) -> None:
         """Обработка ошибок API Google"""
-        # Ждем и пробуем переподключиться
         time.sleep(5)
         try:
             self._connect()
@@ -1894,22 +1822,18 @@ class GoogleSheetsDatabase:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup_file = backup_dir / f"gs_backup_{timestamp}.parquet"
             
-            # Сохраняем в Parquet для эффективности
             self.df.to_parquet(backup_file)
             
-            # Также сохраняем в CSV для совместимости
             csv_file = backup_dir / f"gs_backup_{timestamp}.csv"
             self.df.to_csv(csv_file, index=False, encoding='utf-8-sig')
             
             self.last_backup_time = datetime.now()
             self.logger.info(f"Создан бэкап: {backup_file}")
             
-            # Удаляем старые бэкапы (оставляем последние 10)
             backup_files = sorted(backup_dir.glob("gs_backup_*.parquet"))
             if len(backup_files) > 10:
                 for old_backup in backup_files[:-10]:
                     old_backup.unlink()
-                    # Удаляем соответствующий CSV
                     csv_old = old_backup.with_suffix('.csv')
                     if csv_old.exists():
                         csv_old.unlink()
@@ -1960,7 +1884,6 @@ class GoogleSheetsDatabase:
         mask = self.df['артикул'] == sku
         
         if not mask.any():
-            # Товар не найден, создаем новый
             new_row = {col: '' for col in self.df.columns}
             new_row['артикул'] = sku
             new_row.update(kwargs)
@@ -1970,7 +1893,6 @@ class GoogleSheetsDatabase:
             self._save()
             return True
         
-        # Обновляем существующий товар
         for key, value in kwargs.items():
             if key in self.df.columns:
                 self.df.loc[mask, key] = value
@@ -1992,7 +1914,6 @@ class GoogleSheetsDatabase:
                 if not sku:
                     continue
                 
-                # Удаляем sku из словаря обновления
                 update_data = {k: v for k, v in update.items() if k != 'sku'}
                 
                 if self.update_product(sku, **update_data):
@@ -2019,7 +1940,6 @@ class GoogleSheetsDatabase:
                 if not sku:
                     continue
                 
-                # Рассчитываем цену
                 base_price = float(row.get('цена_базовая', 0))
                 retail_price = float(row.get('цена_розница', 0))
                 
@@ -2028,14 +1948,12 @@ class GoogleSheetsDatabase:
                 elif markup_percent > 0 and retail_price == base_price:
                     retail_price = base_price * (1 + markup_percent / 100)
                 
-                # Определяем остаток для отправки
                 stock = int(row.get('остаток', 0))
                 if stock < min_stock_threshold:
                     stock_to_send = 0
                 else:
                     stock_to_send = stock
                 
-                # Подготавливаем оффер
                 offer = {
                     'sku': sku,
                     'price': round(retail_price, 2),
@@ -2083,7 +2001,6 @@ class GoogleSheetsDatabase:
         base_prices = pd.to_numeric(self.df['цена_базовая'], errors='coerce')
         stocks = pd.to_numeric(self.df['остаток'], errors='coerce').fillna(0)
         
-        # Расчет наценки
         markup = ((prices - base_prices) / base_prices * 100).replace([np.inf, -np.inf], np.nan)
         
         return {
@@ -2141,7 +2058,6 @@ class GoogleSheetsDatabase:
             workbook = writer.book
             worksheet = writer.sheets['Товары']
             
-            # Форматирование
             header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
             header_font = Font(color='FFFFFF', bold=True, size=11)
             
@@ -2150,7 +2066,6 @@ class GoogleSheetsDatabase:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            # Автоподбор ширины колонок
             for column in worksheet.columns:
                 max_length = 0
                 column_letter = get_column_letter(column[0].column)
@@ -2163,7 +2078,6 @@ class GoogleSheetsDatabase:
                 adjusted_width = min(max_length + 2, 50)
                 worksheet.column_dimensions[column_letter].width = adjusted_width
             
-            # Добавляем автофильтр
             worksheet.auto_filter.ref = f"A1:{get_column_letter(len(self.df.columns))}{len(self.df) + 1}"
         
         self.logger.info(f"База экспортирована в {export_path}")
@@ -2235,7 +2149,7 @@ class YandexMarketClient:
             'Accept': 'application/json'
         })
         self.base_url = self.config.yandex_api_url
-        self.rate_limit_delay = 0.1  # Задержка между запросами для соблюдения лимитов
+        self.rate_limit_delay = 0.1
         self.last_request_time = 0
         self.request_count = 0
         self.max_requests_per_minute = 100
@@ -2245,12 +2159,10 @@ class YandexMarketClient:
         """Соблюдение ограничений частоты запросов"""
         current_time = time.time()
         
-        # Сбрасываем счетчик каждую минуту
         if current_time - self.request_window_start > 60:
             self.request_count = 0
             self.request_window_start = current_time
         
-        # Если превысили лимит, ждем
         if self.request_count >= self.max_requests_per_minute:
             wait_time = 60 - (current_time - self.request_window_start) + 1
             self.logger.warning(f"Превышен лимит запросов, ожидание {wait_time:.1f} секунд")
@@ -2258,7 +2170,6 @@ class YandexMarketClient:
             self.request_count = 0
             self.request_window_start = time.time()
         
-        # Минимальная задержка между запросами
         time_since_last = current_time - self.last_request_time
         if time_since_last < self.rate_limit_delay:
             time.sleep(self.rate_limit_delay - time_since_last)
@@ -2296,7 +2207,6 @@ class YandexMarketClient:
                 
                 response_headers = dict(response.headers)
                 
-                # Логируем информацию о запросе для отладки
                 self.logger.debug(
                     f"API запрос: {method} {endpoint} -> Статус: {response.status_code}",
                     context={
@@ -2315,15 +2225,12 @@ class YandexMarketClient:
                         'raw_response': response.text[:500]
                     }
                 
-                # Успешный ответ
                 if 200 <= response.status_code < 300:
                     return response.status_code, response_data, response_headers
                 
-                # Клиентские ошибки (4xx)
                 if 400 <= response.status_code < 500:
                     error_msg = response_data.get('error', response_data.get('message', f'HTTP {response.status_code}'))
                     
-                    # Не повторяем для некоторых ошибок
                     if response.status_code in [400, 401, 403, 404, 409, 422]:
                         self.logger.error(f"API ошибка {response.status_code}: {error_msg}")
                         return response.status_code, response_data, response_headers
@@ -2334,7 +2241,6 @@ class YandexMarketClient:
                         time.sleep(delay)
                         continue
                 
-                # Серверные ошибки (5xx)
                 if response.status_code >= 500:
                     if attempt < retries - 1:
                         delay = self.config.retry_delay * (self.config.retry_backoff_multiplier ** attempt)
@@ -2371,14 +2277,12 @@ class YandexMarketClient:
     def test_connection(self) -> Tuple[bool, str]:
         """Расширенная проверка подключения к API"""
         try:
-            # Проверяем наличие токена и ID кампании
             if not self.config.yandex_token:
                 return False, "Не указан OAuth токен"
             
             if not self.config.campaign_id:
                 return False, "Не указан ID кампании"
             
-            # Проверяем подключение
             status, data, headers = self._make_request(
                 'GET', 
                 f'/campaigns/{self.config.campaign_id}'
@@ -2423,7 +2327,6 @@ class YandexMarketClient:
         for i in range(0, len(offers), self.config.max_offers_per_request):
             batch = offers[i:i + self.config.max_offers_per_request]
             
-            # Подготавливаем данные для отправки
             price_items = []
             for offer in batch:
                 item = {
@@ -2444,7 +2347,6 @@ class YandexMarketClient:
                 success_count += batch_success
                 self.logger.info(f"Цены обновлены для {batch_success} товаров (пакет {i // self.config.max_offers_per_request + 1})")
             elif status == 202:
-                # Запрос принят, но требует времени на обработку
                 self.logger.info(f"Запрос на обновление цен принят (пакет {i // self.config.max_offers_per_request + 1})")
                 success_count += len(batch)
             else:
@@ -2471,7 +2373,6 @@ class YandexMarketClient:
         for i in range(0, len(offers), self.config.max_offers_per_request):
             batch = offers[i:i + self.config.max_offers_per_request]
             
-            # Подготавливаем данные для отправки
             stock_items = []
             for offer in batch:
                 item = {
@@ -2572,7 +2473,6 @@ class YandexMarketClient:
         }
         
         try:
-            # Получаем общую статистику
             status, data, headers = self._make_request(
                 'GET',
                 f'/campaigns/{self.config.campaign_id}/stats/main'
@@ -2583,7 +2483,6 @@ class YandexMarketClient:
                 stats['total_offers'] = main_stats.get('totalOffers', 0)
                 stats['active_offers'] = main_stats.get('activeOffers', 0)
             
-            # Получаем историю операций за сегодня
             today = datetime.now().strftime('%Y-%m-%d')
             status, data, headers = self._make_request(
                 'GET',
@@ -2607,7 +2506,6 @@ class YandexMarketClient:
             'stocks': {'success': True, 'errors': [], 'updated': 0}
         }
         
-        # Обновляем цены
         prices_success, prices_errors, prices_count = self.update_prices(offers)
         result['prices'] = {
             'success': prices_success,
@@ -2615,7 +2513,6 @@ class YandexMarketClient:
             'updated': prices_count
         }
         
-        # Обновляем остатки
         stocks_success, stocks_errors, stocks_count = self.update_stocks(offers)
         result['stocks'] = {
             'success': stocks_success,
@@ -2633,7 +2530,6 @@ class YandexMarketClient:
         for offer in offers:
             offer_errors = []
             
-            # Проверка обязательных полей
             if not offer.get('sku'):
                 offer_errors.append("Отсутствует артикул")
             
@@ -2657,10 +2553,11 @@ class YandexMarketClient:
         
         if errors:
             self.logger.warning(f"Найдено {len(errors)} некорректных офферов")
-            for error in errors[:10]:  # Логируем первые 10 ошибок
+            for error in errors[:10]:
                 self.logger.debug(f"Оффер {error['sku']}: {', '.join(error['errors'])}")
         
         return validated
+
 
 # ===================================================================
 # БЛОК 8: РАСШИРЕННЫЙ ЗАГРУЗЧИК ИЗ ПОЧТЫ
@@ -2701,7 +2598,6 @@ class EmailDownloader:
                     f"(попытка {self.connection_attempts}/{self.max_connection_attempts})"
                 )
                 
-                # Создаем подключение с таймаутом
                 if self.config.imap_port == 993:
                     self.mail = imaplib.IMAP4_SSL(
                         self.config.imap_server, 
@@ -2715,7 +2611,6 @@ class EmailDownloader:
                         timeout=self.connection_timeout
                     )
                 
-                # Отключаем проверку SSL если нужно
                 if not self.config.email_ssl_verify:
                     self.logger.warning("Проверка SSL сертификата отключена")
                     import ssl
@@ -2730,15 +2625,12 @@ class EmailDownloader:
                             timeout=self.connection_timeout
                         )
                 
-                # Логинимся
                 self.mail.login(self.config.email_user, self.config.email_pass)
                 
-                # Выбираем папку INBOX
                 status, data = self.mail.select('INBOX')
                 if status != 'OK':
                     raise Exception(f"Не удалось выбрать папку INBOX: {data}")
                 
-                # Получаем информацию о папке
                 status, mailbox_info = self.mail.status('INBOX', '(MESSAGES UNSEEN RECENT)')
                 if status == 'OK':
                     info_str = mailbox_info[0].decode('utf-8', errors='ignore')
@@ -2817,27 +2709,21 @@ class EmailDownloader:
         try:
             criteria = custom_criteria or []
             
-            # Добавляем фильтр по отправителю
             if self.config.sender_filter:
                 criteria.append(f'FROM "{self.config.sender_filter}"')
             
-            # Добавляем фильтр по теме
             if self.config.subject_filter:
                 criteria.append(f'SUBJECT "{self.config.subject_filter}"')
             
-            # Добавляем фильтр по дате
             since_date = (datetime.now() - timedelta(days=self.config.email_search_days)).strftime("%d-%b-%Y")
             criteria.append(f'SINCE {since_date}')
             
-            # Добавляем фильтр непрочитанных если нужно
             criteria.append('UNSEEN')
             
-            # Формируем строку поиска
             search_criteria = ' '.join(criteria) if criteria else 'ALL'
             
             self.logger.debug(f"Критерии поиска: {search_criteria}")
             
-            # Выполняем поиск
             status, messages = self.mail.search(None, search_criteria)
             
             if status != 'OK':
@@ -2850,24 +2736,20 @@ class EmailDownloader:
             
             email_ids = messages[0].split()
             
-            # Ограничиваем количество обрабатываемых писем
             if len(email_ids) > self.config.email_max_emails:
                 self.logger.info(f"Найдено {len(email_ids)} писем, обрабатываем последние {self.config.email_max_emails}")
                 email_ids = email_ids[-self.config.email_max_emails:]
             else:
                 self.logger.info(f"Найдено {len(email_ids)} писем для обработки")
             
-            # Получаем информацию о письмах
             email_list = []
             for msg_id in email_ids:
                 try:
-                    # Получаем ENVELOPE для быстрого получения метаданных
                     status, msg_data = self.mail.fetch(msg_id, '(ENVELOPE FLAGS INTERNALDATE)')
                     if status != 'OK':
                         self.logger.warning(f"Не удалось получить данные письма {msg_id}")
                         continue
                     
-                    # Парсим ответ сервера
                     envelope_data = None
                     flags = []
                     internal_date = None
@@ -2876,13 +2758,11 @@ class EmailDownloader:
                         if isinstance(part, tuple):
                             envelope_str = part[0].decode('utf-8', errors='ignore') if isinstance(part[0], bytes) else str(part[0])
                             
-                            # Извлекаем флаги
                             if b'FLAGS' in part[0] if isinstance(part[0], bytes) else 'FLAGS' in envelope_str:
                                 flags_match = re.search(r'FLAGS\s*\(([^)]*)\)', envelope_str)
                                 if flags_match:
                                     flags = flags_match.group(1).split()
                             
-                            # Извлекаем INTERNALDATE
                             if b'INTERNALDATE' in part[0] if isinstance(part[0], bytes) else 'INTERNALDATE' in envelope_str:
                                 date_match = re.search(r'INTERNALDATE\s*"([^"]*)"', envelope_str)
                                 if date_match:
@@ -2890,11 +2770,9 @@ class EmailDownloader:
                             
                             envelope_data = envelope_str
                     
-                    # Получаем ENVELOPE отдельно если нужно
                     status, envelope_response = self.mail.fetch(msg_id, '(ENVELOPE)')
                     envelope = None
                     if status == 'OK' and envelope_response[0]:
-                        import email
                         msg = email.message_from_bytes(envelope_response[0][1])
                         envelope = {
                             'subject': msg.get('Subject', ''),
@@ -2903,7 +2781,6 @@ class EmailDownloader:
                             'message_id': msg.get('Message-ID', '')
                         }
                     
-                    # Декодируем тему
                     subject = ''
                     if envelope and envelope.get('subject'):
                         subject_parts = decode_header(envelope['subject'])
@@ -2951,7 +2828,6 @@ class EmailDownloader:
                     self.logger.error(f"Ошибка обработки письма {msg_id}: {e}")
                     continue
             
-            # Сортируем по дате (новые сначала)
             email_list.sort(key=lambda x: x.get('date') or datetime.min, reverse=True)
             
             return email_list
@@ -2973,17 +2849,14 @@ class EmailDownloader:
         try:
             msg_id = email_data['id']
             
-            # Получаем полное содержимое письма
             status, msg_data = self.mail.fetch(msg_id, '(RFC822)')
             
             if status != 'OK':
                 self.logger.error(f"Не удалось получить содержимое письма {msg_id}")
                 return []
             
-            # Парсим письмо
             msg = email.message_from_bytes(msg_data[0][1], policy=email_default_policy)
             
-            # Получаем основную информацию о письме
             subject = msg.get('Subject', '')
             from_addr = msg.get('From', '')
             date_str = msg.get('Date', '')
@@ -2993,33 +2866,27 @@ class EmailDownloader:
                 context={'message_id': msg_id, 'from': from_addr, 'subject': subject[:100]}
             )
             
-            # Проходим по всем частям письма
             for part in msg.walk():
                 content_type = part.get_content_type()
                 content_disposition = str(part.get('Content-Disposition', ''))
                 content_transfer_encoding = part.get('Content-Transfer-Encoding', '')
                 
-                # Определяем, является ли часть вложением
                 is_attachment = False
                 filename = None
                 
-                # Проверяем Content-Disposition
                 if 'attachment' in content_disposition.lower():
                     is_attachment = True
                     filename = part.get_filename()
                 
-                # Проверяем наличие имени файла
                 if not filename:
                     filename = part.get_filename()
                 
-                # Если есть имя файла, считаем вложением
                 if filename:
                     is_attachment = True
                 
                 if not is_attachment or not filename:
                     continue
                 
-                # Декодируем имя файла
                 try:
                     decoded_parts = decode_header(filename)
                     filename = ''
@@ -3034,32 +2901,27 @@ class EmailDownloader:
                 except Exception as e:
                     self.logger.debug(f"Ошибка декодирования имени файла: {e}")
                 
-                # Очищаем имя файла от недопустимых символов
                 filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
                 
-                # Проверяем расширение файла
                 ext = os.path.splitext(filename)[1].lower()
                 
                 if ext not in self.ALLOWED_EXTENSIONS:
-                    # Проверяем MIME-тип
                     if content_type not in self.ALLOWED_MIME_TYPES:
                         self.logger.debug(f"Пропускаем файл {filename} (тип: {content_type}, расширение: {ext})")
                         continue
                 
-                # Извлекаем содержимое
                 try:
                     content = part.get_payload(decode=True)
                     if not content:
                         self.logger.warning(f"Пустое содержимое вложения: {filename}")
                         continue
                     
-                    # Проверяем размер файла
                     file_size = len(content)
                     if file_size == 0:
                         self.logger.warning(f"Файл {filename} имеет нулевой размер")
                         continue
                     
-                    if file_size > 100 * 1024 * 1024:  # 100 MB
+                    if file_size > 100 * 1024 * 1024:
                         self.logger.warning(f"Файл {filename} слишком большой ({file_size / 1024 / 1024:.1f} MB), пропускаем")
                         continue
                     
@@ -3079,7 +2941,6 @@ class EmailDownloader:
                     self.logger.error(f"Ошибка извлечения содержимого {filename}: {e}")
                     continue
             
-            # Помечаем письмо как прочитанное если нужно
             if self.config.email_mark_as_read:
                 try:
                     self.mail.store(msg_id, '+FLAGS', '\\Seen')
@@ -3087,7 +2948,6 @@ class EmailDownloader:
                 except Exception as e:
                     self.logger.warning(f"Не удалось пометить письмо как прочитанное: {e}")
             
-            # Удаляем письмо если нужно
             if self.config.email_delete_after_processing:
                 try:
                     self.mail.store(msg_id, '+FLAGS', '\\Deleted')
@@ -3119,12 +2979,10 @@ class EmailDownloader:
             return stats
         
         try:
-            # Получаем статус папки INBOX
             status, data = self.mail.status('INBOX', '(MESSAGES UNSEEN RECENT)')
             if status == 'OK':
                 status_str = data[0].decode('utf-8', errors='ignore')
                 
-                # Парсим статистику
                 messages_match = re.search(r'MESSAGES\s+(\d+)', status_str)
                 unseen_match = re.search(r'UNSEEN\s+(\d+)', status_str)
                 recent_match = re.search(r'RECENT\s+(\d+)', status_str)
@@ -3136,12 +2994,10 @@ class EmailDownloader:
                 if recent_match:
                     stats['recent_messages'] = int(recent_match.group(1))
             
-            # Получаем квоту если поддерживается
             try:
                 status, quota_data = self.mail.getquotaroot('INBOX')
                 if status == 'OK' and quota_data:
                     quota_str = quota_data[0].decode('utf-8', errors='ignore') if isinstance(quota_data[0], bytes) else str(quota_data[0])
-                    # Парсим информацию о квоте
                     usage_match = re.search(r'STORAGE\s+(\d+)\s+(\d+)', quota_str)
                     if usage_match:
                         stats['mailbox_usage_kb'] = int(usage_match.group(1))
@@ -3166,13 +3022,11 @@ class EmailDownloader:
         try:
             criteria = []
             
-            # Добавляем фильтры
             if sender:
                 criteria.append(f'FROM "{sender}"')
             if subject:
                 criteria.append(f'SUBJECT "{subject}"')
             
-            # Формируем критерии даты
             start_str = start_date.strftime("%d-%b-%Y")
             end_str = end_date.strftime("%d-%b-%Y")
             criteria.append(f'SINCE {start_str}')
@@ -3195,20 +3049,17 @@ class EmailDownloader:
             return all_attachments
         
         try:
-            # Выбираем папку
             status, data = self.mail.select(folder)
             if status != 'OK':
                 self.logger.error(f"Не удалось выбрать папку {folder}")
                 return all_attachments
             
-            # Ищем все письма
             status, messages = self.mail.search(None, 'ALL')
             if status != 'OK' or not messages[0]:
                 return all_attachments
             
             email_ids = messages[0].split()
             
-            # Ограничиваем количество
             if len(email_ids) > max_emails:
                 email_ids = email_ids[-max_emails:]
             
@@ -3251,7 +3102,7 @@ class PriceParser:
         """Автоматическое определение кодировки файла"""
         if CHARDET_SUPPORT:
             try:
-                result = chardet.detect(content[:10000])  # Анализируем первые 10KB
+                result = chardet.detect(content[:10000])
                 encoding = result.get('encoding', 'utf-8')
                 confidence = result.get('confidence', 0)
                 
@@ -3261,7 +3112,6 @@ class PriceParser:
             except Exception as e:
                 self.logger.debug(f"Ошибка определения кодировки chardet: {e}")
         
-        # Пробуем популярные кодировки
         for encoding in self.supported_encodings:
             try:
                 content[:100].decode(encoding)
@@ -3294,7 +3144,6 @@ class PriceParser:
         if ext in format_map:
             return format_map[ext]
         
-        # Если расширение не определено, пробуем по содержимому
         if content and MAGIC_SUPPORT:
             try:
                 mime = magic.Magic(mime=True)
@@ -3332,13 +3181,11 @@ class PriceParser:
         file_format = self.detect_format(filename, content)
         
         try:
-            # Определяем кодировку для текстовых форматов
             if file_format in [FileFormat.CSV, FileFormat.TXT, FileFormat.XML, FileFormat.JSON]:
                 encoding = self.detect_encoding(content)
             else:
                 encoding = 'utf-8'
             
-            # Парсим в зависимости от формата
             if file_format in [FileFormat.EXCEL_XLSX, FileFormat.EXCEL_XLS]:
                 df = self._parse_excel(content)
             elif file_format == FileFormat.CSV:
@@ -3350,23 +3197,19 @@ class PriceParser:
             elif file_format == FileFormat.TXT:
                 df = self._parse_txt(content, encoding)
             else:
-                # Пробуем все форматы по очереди
                 df = self._try_all_formats(content, encoding)
             
             if df is None or df.empty:
                 raise ValueError(f"Не удалось распарсить файл {filename}")
             
-            # Применяем правила обработки
             if processing_rules:
                 df = self._apply_processing_rules(df, processing_rules)
             
-            # Применяем маппинг если передан
             if column_mapping and any(column_mapping.values()):
                 df = self._apply_mapping(df, column_mapping)
             else:
                 df = self._clean_dataframe(df)
             
-            # Валидируем результат
             validation = self.validate_data(df)
             if not validation.is_valid:
                 self.logger.warning(
@@ -3406,7 +3249,6 @@ class PriceParser:
     def _parse_excel(self, content: bytes) -> pd.DataFrame:
         """Расширенный парсинг Excel файлов"""
         try:
-            # Пробуем разные движки
             engines = ['openpyxl', 'xlrd', 'odf']
             
             for engine in engines:
@@ -3423,11 +3265,9 @@ class PriceParser:
                 except Exception:
                     continue
             
-            # Пробуем читать все листы
             try:
                 all_sheets = pd.read_excel(BytesIO(content), sheet_name=None, engine='openpyxl')
                 if all_sheets:
-                    # Берем первый непустой лист
                     for sheet_name, sheet_df in all_sheets.items():
                         if not sheet_df.empty:
                             self.logger.info(f"Прочитан лист: {sheet_name}")
@@ -3444,24 +3284,20 @@ class PriceParser:
         """Расширенный парсинг CSV файлов с автоопределением разделителя"""
         separators = [';', ',', '\t', '|', ':']
         
-        # Декодируем содержимое
         text_content = content.decode(encoding, errors='ignore')
         
-        # Определяем разделитель
         best_sep = None
         best_score = 0
         
         for sep in separators:
-            lines = text_content.split('\n')[:10]  # Анализируем первые 10 строк
+            lines = text_content.split('\n')[:10]
             if len(lines) < 2:
                 continue
             
-            # Считаем количество колонок
             col_counts = [len(line.split(sep)) for line in lines if line.strip()]
             if not col_counts:
                 continue
             
-            # Проверяем консистентность
             most_common = max(set(col_counts), key=col_counts.count)
             consistency = col_counts.count(most_common) / len(col_counts)
             
@@ -3488,7 +3324,6 @@ class PriceParser:
             if len(df.columns) > 1:
                 return df
             
-            # Если не получилось, пробуем другие кодировки
             for enc in self.supported_encodings:
                 if enc == encoding:
                     continue
@@ -3519,7 +3354,6 @@ class PriceParser:
             text = content.decode(encoding, errors='ignore')
             root = ET.fromstring(text)
             
-            # Ищем товары по различным тегам
             product_tags = ['offer', 'item', 'product', 'товар', 'good', 'position']
             
             for tag in product_tags:
@@ -3528,14 +3362,11 @@ class PriceParser:
                     rows = []
                     for elem in elements:
                         row = {}
-                        # Извлекаем атрибуты
                         for attr, value in elem.attrib.items():
                             row[f'@{attr}'] = value
-                        # Извлекаем дочерние элементы
                         for child in elem:
                             if child.text and child.text.strip():
                                 row[child.tag] = child.text.strip()
-                            # Рекурсивно извлекаем вложенные элементы
                             for subchild in child:
                                 if subchild.text and subchild.text.strip():
                                     row[f'{child.tag}_{subchild.tag}'] = subchild.text.strip()
@@ -3545,7 +3376,6 @@ class PriceParser:
                     if rows:
                         return pd.DataFrame(rows)
             
-            # Пробуем найти табличную структуру
             table_tags = ['table', 'data', 'list', 'rows', 'items']
             for table_tag in table_tags:
                 table = root.find(f'.//{table_tag}')
@@ -3578,11 +3408,9 @@ class PriceParser:
             text = content.decode(encoding, errors='ignore')
             data = json.loads(text)
             
-            # Обрабатываем разные структуры JSON
             if isinstance(data, list):
                 return pd.DataFrame(data)
             elif isinstance(data, dict):
-                # Ищем массив с данными
                 array_keys = ['offers', 'items', 'products', 'data', 'rows', 'list', 'results', 'records']
                 for key in array_keys:
                     if key in data and isinstance(data[key], list):
@@ -3590,7 +3418,6 @@ class PriceParser:
                         if not df.empty:
                             return df
                 
-                # Может быть вложенная структура
                 for key, value in data.items():
                     if isinstance(value, dict):
                         for sub_key in array_keys:
@@ -3599,7 +3426,6 @@ class PriceParser:
                                 if not df.empty:
                                     return df
                 
-                # Если один объект, делаем DataFrame из него
                 return pd.DataFrame([data])
             
             raise ValueError("Не удалось распарсить JSON")
@@ -3616,8 +3442,7 @@ class PriceParser:
             if not lines:
                 raise ValueError("Файл пуст")
             
-            # Определяем разделитель
-            separators = ['\t', ';', ',', '|', '  ']  # Пробел последний
+            separators = ['\t', ';', ',', '|', '  ']
             
             best_sep = None
             best_score = 0
@@ -3637,12 +3462,10 @@ class PriceParser:
             if best_sep:
                 return pd.read_csv(StringIO(text), sep=best_sep, engine='python')
             
-            # Пробуем fixed-width формат
             df = pd.read_fwf(StringIO(text))
             if len(df.columns) > 1:
                 return df
             
-            # Последняя попытка - читаем как одну колонку
             return pd.DataFrame(lines, columns=['data'])
             
         except Exception as e:
@@ -3653,16 +3476,13 @@ class PriceParser:
         if df.empty:
             return df
         
-        # Пропускаем строки
         skip_rows = rules.get('skip_rows', 0)
         if skip_rows > 0:
             df = df.iloc[skip_rows:]
         
-        # Пропускаем пустые строки
         if rules.get('skip_empty_rows', True):
             df = df.dropna(how='all')
         
-        # Применяем множитель цены
         price_multiplier = rules.get('price_multiplier', 1.0)
         if price_multiplier != 1.0 and 'price' in df.columns:
             df['price'] = pd.to_numeric(df['price'], errors='coerce') * price_multiplier
@@ -3674,7 +3494,6 @@ class PriceParser:
         if df.empty:
             return df
         
-        # Создаем новый DataFrame с переименованными колонками
         new_df = pd.DataFrame()
         
         for target_col, source_col in mapping.items():
@@ -3683,7 +3502,6 @@ class PriceParser:
             elif source_col and source_col.strip() == '':
                 new_df[target_col] = ''
             else:
-                # Ищем похожую колонку
                 if source_col:
                     similar_cols = [col for col in df.columns if source_col.lower() in col.lower()]
                     if similar_cols:
@@ -3694,7 +3512,6 @@ class PriceParser:
                 else:
                     new_df[target_col] = ''
         
-        # Очистка и нормализация
         return self._clean_dataframe(new_df)
     
     def _clean_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -3702,32 +3519,27 @@ class PriceParser:
         if df.empty:
             return df
         
-        # Удаляем полностью пустые строки и колонки
         df = df.dropna(how='all')
         df = df.dropna(axis=1, how='all')
         
-        # Нормализуем названия колонок
         df.columns = [str(col).strip().lower() for col in df.columns]
         
-        # Применяем глобальный маппинг для автоопределения
         column_map = {}
         for target, variants in self.config.column_mapping.items():
             for col in df.columns:
                 col_clean = col.lower().strip()
                 for variant in variants:
                     if variant in col_clean or col_clean in variant:
-                        if col not in column_map:  # Не переопределяем уже назначенные
+                        if col not in column_map:
                             column_map[col] = target
                         break
                 if col in column_map:
                     break
         
-        # Переименовываем колонки
         for old, new in column_map.items():
             if old != new:
                 df = df.rename(columns={old: new})
         
-        # Нормализация данных
         if 'sku' in df.columns:
             df['sku'] = df['sku'].astype(str).str.strip()
             if self.config.validation_config.get('auto_fix_sku_uppercase', True):
@@ -3756,7 +3568,6 @@ class PriceParser:
         if 'category' in df.columns:
             df['category'] = df['category'].astype(str).str.strip()
         
-        # Удаление дубликатов
         if 'sku' in df.columns and self.config.validation_config.get('auto_remove_duplicates', True):
             df = df.drop_duplicates(subset=['sku'], keep='first')
         
@@ -3773,16 +3584,13 @@ class PriceParser:
         validation_config = self.config.validation_config
         total_rows = len(df)
         
-        # Статистика
         result.statistics['total_rows'] = total_rows
         result.statistics['columns'] = list(df.columns)
         
-        # Проверка обязательных колонок
         for field in validation_config.get('required_fields', ['sku', 'price']):
             if field not in df.columns:
                 result.add_error(f"Отсутствует обязательная колонка: {field}")
         
-        # Валидация SKU
         if 'sku' in df.columns:
             empty_sku = df['sku'].isna().sum() + (df['sku'] == '').sum()
             if empty_sku > 0:
@@ -3799,7 +3607,6 @@ class PriceParser:
             
             result.statistics['valid_skus'] = total_rows - empty_sku
         
-        # Валидация цен
         if 'price' in df.columns:
             min_price = validation_config.get('min_price', 0.01)
             max_price = validation_config.get('max_price', 999999999)
@@ -3819,7 +3626,6 @@ class PriceParser:
                 'median': float(df['price'].median())
             }
         
-        # Валидация остатков
         if 'stock' in df.columns:
             max_stock = validation_config.get('max_stock', 999999)
             high_stock = (df['stock'] > max_stock).sum()
@@ -3862,9 +3668,10 @@ class PriceParser:
         
         return info
 
+
 # ===================================================================
 # БЛОК 10: РАСШИРЕННЫЙ КОНСТРУКТОР МАППИНГА КОЛОНОК
-# С ПОДДЕРЖКОЙ ЛОКАЛЬНОЙ ЗАГРУЗКИ ФАЙЛОВ И ЗАГРУЗКИ ИЗ ПОЧТЫ
+# С ПОДДЕРЖКОЙ ЛОКАЛЬНОЙ ЗАГРУЗКИ ФАЙЛОВ
 # ===================================================================
 
 class MappingConstructor:
@@ -3881,10 +3688,8 @@ class MappingConstructor:
         self.email_downloader = EmailDownloader(config, logger)
         self.mapping_templates: Dict[str, Dict[str, str]] = self._load_templates()
         
-        # Кэш для хранения загруженных файлов
         self.uploaded_files_cache: Dict[str, Dict] = {}
         
-        # Директория для временного хранения загруженных файлов
         self.upload_dir = Path(config.temp_dir) / 'mapping_uploads'
         self.upload_dir.mkdir(parents=True, exist_ok=True)
     
@@ -3988,7 +3793,6 @@ class MappingConstructor:
             }
         }
         
-        # Загружаем пользовательские шаблоны из файла если есть
         templates_file = Path(self.config.cache_dir) / 'mapping_templates.json'
         if templates_file.exists():
             try:
@@ -4007,7 +3811,6 @@ class MappingConstructor:
         templates_file.parent.mkdir(parents=True, exist_ok=True)
         
         try:
-            # Сохраняем только пользовательские шаблоны (не системные)
             system_templates = ['standard', 'minimal', 'extended', 'yandex_market', 'ozon', 'wildberries', '1c_export']
             custom_templates = {k: v for k, v in self.mapping_templates.items() if k not in system_templates}
             
@@ -4029,10 +3832,7 @@ class MappingConstructor:
         Returns:
             Путь к сохраненному файлу
         """
-        # Очищаем имя файла от недопустимых символов
         safe_filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        
-        # Добавляем временную метку для уникальности
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         unique_filename = f"{timestamp}_{safe_filename}"
         
@@ -4044,7 +3844,6 @@ class MappingConstructor:
             
             self.logger.info(f"Файл сохранен локально: {filepath}")
             
-            # Сохраняем информацию в кэше
             self.uploaded_files_cache[unique_filename] = {
                 'original_filename': filename,
                 'filepath': str(filepath),
@@ -4077,12 +3876,11 @@ class MappingConstructor:
         if not filepath.is_file():
             raise ValueError(f"Указанный путь не является файлом: {filepath}")
         
-        # Проверяем размер файла
         file_size = filepath.stat().st_size
         if file_size == 0:
             raise ValueError(f"Файл пуст: {filepath}")
         
-        if file_size > 100 * 1024 * 1024:  # 100 MB
+        if file_size > 100 * 1024 * 1024:
             raise ValueError(f"Файл слишком большой ({file_size / 1024 / 1024:.1f} MB): {filepath}")
         
         try:
@@ -4118,7 +3916,6 @@ class MappingConstructor:
         if not supplier.email or not supplier.email_password:
             raise ValueError(f"Для поставщика '{supplier_name}' не указаны email или пароль")
         
-        # Создаем временный конфиг для подключения к почте поставщика
         temp_config = Config()
         temp_config.email_user = supplier.email
         temp_config.email_pass = supplier.email_password
@@ -4127,7 +3924,6 @@ class MappingConstructor:
         temp_config.email_search_days = self.config.email_search_days
         temp_config.email_max_emails = max_emails
         
-        # Создаем временный загрузчик почты
         email_downloader = EmailDownloader(temp_config, self.logger)
         
         files = []
@@ -4136,21 +3932,18 @@ class MappingConstructor:
             if not email_downloader.connect():
                 raise ConnectionError(f"Не удалось подключиться к почте поставщика {supplier_name}")
             
-            # Ищем письма
             emails = email_downloader.search_emails()
             
             if not emails:
                 self.logger.info(f"Нет писем от поставщика {supplier_name}")
                 return files
             
-            # Скачиваем вложения
             for email_data in emails[:max_emails]:
                 attachments = email_downloader.download_attachments(email_data)
                 
                 for filename, content, mime_type in attachments:
                     files.append((content, filename, email_data.get('subject', '')))
                     
-                    # Сохраняем локально
                     self.save_uploaded_file(content, filename)
                     
                     self.logger.info(
@@ -4175,13 +3968,11 @@ class MappingConstructor:
             Кортеж (содержимое файла, имя файла)
         """
         try:
-            # Определяем имя файла из URL если не указано
             if filename is None:
                 filename = url.split('/')[-1].split('?')[0]
                 if not filename:
                     filename = f"downloaded_file_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
-            # Загружаем файл
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
@@ -4189,7 +3980,6 @@ class MappingConstructor:
             response = requests.get(url, headers=headers, timeout=30, stream=True)
             response.raise_for_status()
             
-            # Проверяем размер
             content_length = response.headers.get('content-length')
             if content_length and int(content_length) > 100 * 1024 * 1024:
                 raise ValueError(f"Файл слишком большой ({int(content_length) / 1024 / 1024:.1f} MB)")
@@ -4199,7 +3989,6 @@ class MappingConstructor:
             if len(content) == 0:
                 raise ValueError("Получен пустой файл")
             
-            # Сохраняем локально
             self.save_uploaded_file(content, filename)
             
             self.logger.info(f"Файл загружен по URL: {filename} ({len(content)} байт)")
@@ -4220,15 +4009,12 @@ class MappingConstructor:
         Returns:
             Кортеж (содержимое, имя файла) или None
         """
-        # Ищем файлы в архиве
         archive_dir = Path(self.config.archive_dir)
         if archive_dir.exists():
-            # Ищем файлы, связанные с поставщиком
             pattern = f"*{supplier_name}*"
             matching_files = list(archive_dir.glob(pattern))
             
             if matching_files:
-                # Берем самый новый файл
                 latest_file = max(matching_files, key=lambda f: f.stat().st_mtime)
                 
                 try:
@@ -4241,7 +4027,6 @@ class MappingConstructor:
                 except Exception as e:
                     self.logger.warning(f"Ошибка чтения файла из архива: {e}")
         
-        # Ищем в директории загрузок
         uploads_dir = Path(self.config.uploads_dir)
         if uploads_dir.exists():
             matching_files = list(uploads_dir.glob(pattern))
@@ -4273,16 +4058,12 @@ class MappingConstructor:
             Кортеж (DataFrame, список колонок, метаданные)
         """
         try:
-            # Получаем информацию о файле
             file_info = self.parser.get_file_info(content, filename)
             
-            # Парсим файл (без маппинга, чтобы показать сырые данные)
             df = self.parser.parse(filename, content)
             
-            # Определяем кодировку если возможно
             encoding = file_info.get('encoding', 'unknown')
             
-            # Получаем метаданные
             metadata = {
                 'file_info': file_info,
                 'row_count': len(df),
@@ -4296,20 +4077,16 @@ class MappingConstructor:
                 'file_size_formatted': f"{file_info.get('size', 0) / 1024:.1f} KB"
             }
             
-            # Добавляем примеры значений для каждой колонки (первые 5 непустых)
             for col in df.columns:
                 sample = df[col].dropna().head(5).tolist()
                 metadata['sample_values'][col] = sample
                 
-                # Количество пустых значений
                 null_count = df[col].isna().sum()
                 metadata['null_counts'][col] = int(null_count)
                 
-                # Количество уникальных значений
                 unique_count = df[col].nunique()
                 metadata['unique_counts'][col] = int(unique_count)
             
-            # Определяем возможные типы колонок
             column_types = {}
             for col in df.columns:
                 col_data = df[col].dropna()
@@ -4317,7 +4094,6 @@ class MappingConstructor:
                     column_types[col] = 'empty'
                     continue
                 
-                # Проверяем числовые типы
                 numeric_data = pd.to_numeric(col_data, errors='coerce')
                 numeric_ratio = numeric_data.notna().sum() / len(col_data)
                 
@@ -4327,7 +4103,6 @@ class MappingConstructor:
                     else:
                         column_types[col] = 'decimal'
                 else:
-                    # Проверяем длину строк
                     str_data = col_data.astype(str)
                     avg_length = str_data.str.len().mean()
                     
@@ -4359,37 +4134,28 @@ class MappingConstructor:
         mapping = {}
         columns = df.columns.tolist()
         
-        # Функция для проверки, является ли колонка числовой
         def get_numeric_ratio(col_data: pd.Series) -> float:
-            """Возвращает долю числовых значений в колонке"""
             numeric_data = pd.to_numeric(col_data, errors='coerce')
             return numeric_data.notna().sum() / len(col_data) if len(col_data) > 0 else 0
         
-        # Функция для проверки, является ли колонка целочисленной
         def is_integer_column(col_data: pd.Series) -> bool:
-            """Проверяет, содержит ли колонка только целые числа"""
             numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
             if len(numeric_data) == 0:
                 return False
             return (numeric_data == numeric_data.astype(int)).sum() / len(numeric_data) > 0.95
         
-        # Функция для проверки уникальности
         def get_uniqueness(col_data: pd.Series) -> float:
-            """Возвращает долю уникальных значений"""
             non_null = col_data.dropna()
             if len(non_null) == 0:
                 return 0
             return non_null.nunique() / len(non_null)
         
-        # Функция для проверки средней длины строки
         def get_avg_length(col_data: pd.Series) -> float:
-            """Возвращает среднюю длину строковых значений"""
             str_data = col_data.dropna().astype(str)
             if len(str_data) == 0:
                 return 0
             return str_data.str.len().mean()
         
-        # Сначала ищем по названиям колонок
         for target, variants in self.config.column_mapping.items():
             best_match = None
             best_score = 0
@@ -4401,20 +4167,16 @@ class MappingConstructor:
                 for variant in variants:
                     variant_lower = variant.lower()
                     
-                    # Точное совпадение
                     if col_lower == variant_lower:
                         score = 100
                         break
                     
-                    # Содержит вариант
                     if variant_lower in col_lower:
                         score = max(score, 85)
                     
-                    # Вариант содержит название колонки
                     if col_lower in variant_lower:
                         score = max(score, 75)
                     
-                    # Частичное совпадение (по словам)
                     col_words = set(col_lower.replace('_', ' ').split())
                     variant_words = set(variant_lower.replace('_', ' ').split())
                     common_words = col_words & variant_words
@@ -4428,7 +4190,6 @@ class MappingConstructor:
             if best_match:
                 mapping[target] = best_match
         
-        # Для ненайденных колонок пробуем определить по содержимому
         unmapped_columns = [col for col in columns if col not in mapping.values()]
         
         for col in unmapped_columns:
@@ -4437,52 +4198,41 @@ class MappingConstructor:
             uniqueness = get_uniqueness(col_data)
             avg_length = get_avg_length(col_data)
             
-            # Определяем цену
             if 'price' not in mapping and numeric_ratio > 0.8:
                 numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
                 if len(numeric_data) > 0:
                     mean_val = numeric_data.mean()
-                    # Цены обычно положительные и не слишком большие
                     if 0 < mean_val < 10000000:
-                        # Проверяем, есть ли десятичные знаки
                         has_decimals = any('.' in str(x) for x in numeric_data.head(20))
                         if has_decimals or not is_integer_column(col_data):
                             mapping['price'] = col
                             continue
             
-            # Определяем остаток
             if 'stock' not in mapping and numeric_ratio > 0.8:
                 numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
                 if len(numeric_data) > 0:
                     mean_val = numeric_data.mean()
-                    # Остатки обычно целые и не слишком большие
                     if 0 <= mean_val < 100000 and is_integer_column(col_data):
                         mapping['stock'] = col
                         continue
             
-            # Определяем артикул
             if 'sku' not in mapping and uniqueness > 0.5 and avg_length < 30:
-                # Артикулы обычно короткие и уникальные
                 if uniqueness > 0.7 or (uniqueness > 0.5 and avg_length < 15):
                     mapping['sku'] = col
                     continue
             
-            # Определяем название
             if 'name' not in mapping and avg_length > 20 and uniqueness > 0.5:
                 mapping['name'] = col
                 continue
             
-            # Определяем описание
             if 'description' not in mapping and avg_length > 50:
                 mapping['description'] = col
                 continue
             
-            # Определяем вес
             if 'weight' not in mapping and numeric_ratio > 0.8:
                 numeric_data = pd.to_numeric(col_data, errors='coerce').dropna()
                 if len(numeric_data) > 0:
                     mean_val = numeric_data.mean()
-                    # Вес обычно положительный и небольшой
                     if 0 < mean_val < 1000:
                         mapping['weight'] = col
                         continue
@@ -4502,20 +4252,16 @@ class MappingConstructor:
         Returns:
             Словарь маппинга
         """
-        # Если указан шаблон, применяем его как основу
         if template_name and template_name in self.mapping_templates:
             template = self.mapping_templates[template_name].copy()
-            # Объединяем шаблон с выбранными колонками (выбранные имеют приоритет)
             mapping = template.copy()
             for target, source in selected_columns.items():
                 if source and source in df.columns:
                     mapping[target] = source
                 elif source == '':
-                    # Явно удаляем поле из маппинга если выбрана пустая строка
                     if target in mapping:
                         del mapping[target]
         else:
-            # Создаем новый маппинг из выбранных колонок
             mapping = {}
             for target, source in selected_columns.items():
                 if source and source in df.columns:
@@ -4536,13 +4282,11 @@ class MappingConstructor:
         """
         result = ValidationResult()
         
-        # Проверяем обязательные поля
         required_fields = ['sku', 'price']
         for field in required_fields:
             if not mapping.get(field):
                 result.add_error(f"Не указан маппинг для обязательного поля: {field}")
         
-        # Проверяем существование колонок
         for target, source in mapping.items():
             if source and source not in df.columns:
                 result.add_error(f"Колонка '{source}' (для поля '{target}') не найдена в файле")
@@ -4550,7 +4294,6 @@ class MappingConstructor:
         if not result.is_valid:
             return result
         
-        # Применяем маппинг и проверяем результат
         try:
             mapped_df = self.parser._apply_mapping(df.copy(), mapping)
             
@@ -4558,7 +4301,6 @@ class MappingConstructor:
                 result.add_error("После применения маппинга DataFrame пуст")
                 return result
             
-            # Проверяем качество данных
             if 'sku' in mapped_df.columns:
                 total_rows = len(mapped_df)
                 empty_sku = (mapped_df['sku'].isna() | (mapped_df['sku'] == '')).sum()
@@ -4664,7 +4406,6 @@ class MappingConstructor:
                 score = 0
                 reasons = []
                 
-                # Проверка по названию колонки
                 for variant in variants:
                     variant_lower = variant.lower()
                     
@@ -4679,7 +4420,6 @@ class MappingConstructor:
                         score += 35
                         reasons.append(f'Часть от: "{variant}"')
                     
-                    # Проверка по словам
                     col_words = set(col_lower.replace('_', ' ').replace('-', ' ').split())
                     variant_words = set(variant_lower.replace('_', ' ').replace('-', ' ').split())
                     common = col_words & variant_words
@@ -4687,7 +4427,6 @@ class MappingConstructor:
                         score += len(common) * 15
                         reasons.append(f'Общие слова: {", ".join(common)}')
                 
-                # Проверка по содержимому колонки
                 numeric_ratio = 0
                 try:
                     numeric_data = pd.to_numeric(col_data, errors='coerce')
@@ -4749,7 +4488,6 @@ class MappingConstructor:
                     )
                 })
         
-        # Сортируем по уверенности
         return sorted(suggestions, key=lambda x: x['confidence'], reverse=True)
     
     def compare_mappings(self, mapping1: Dict[str, str], mapping2: Dict[str, str]) -> Dict:
@@ -4885,11 +4623,9 @@ class MappingConstructor:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     
-                    # Поддерживаем разные форматы JSON
                     if 'mapping' in data:
                         return data['mapping']
                     elif isinstance(data, dict):
-                        # Может быть сам маппинг
                         if all(isinstance(v, str) for v in data.values()):
                             return data
             
@@ -4972,7 +4708,6 @@ class MappingConstructor:
                         except Exception as e:
                             self.logger.warning(f"Не удалось удалить файл {filepath}: {e}")
         
-        # Очищаем кэш
         self.uploaded_files_cache.clear()
         
         if cleaned > 0:
@@ -5027,7 +4762,7 @@ class MultiSupplierDownloader:
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.download_stats: Dict[str, Dict] = {}
         self.max_concurrent_downloads = config.max_workers
-        self.download_timeout = 120  # секунд на одного поставщика
+        self.download_timeout = 120
     
     def download_from_supplier(self, supplier: SupplierConfig) -> Dict[str, Any]:
         """Расширенная загрузка от одного поставщика с детальной статистикой"""
@@ -5055,7 +4790,6 @@ class MultiSupplierDownloader:
             
             self.logger.info(f"Загрузка прайсов от поставщика: {supplier_name} ({supplier.email})")
             
-            # Подключаемся к почте поставщика
             try:
                 if supplier.imap_port == 993:
                     mail = imaplib.IMAP4_SSL(supplier.imap_server, supplier.imap_port, timeout=60)
@@ -5070,7 +4804,6 @@ class MultiSupplierDownloader:
                 return results
             
             try:
-                # Формируем критерии поиска
                 criteria = []
                 
                 if supplier.sender_filter:
@@ -5085,7 +4818,6 @@ class MultiSupplierDownloader:
                 
                 search_criteria = ' '.join(criteria) if criteria else 'ALL'
                 
-                # Ищем письма
                 status, messages = mail.search(None, search_criteria)
                 
                 if status != 'OK' or not messages[0]:
@@ -5100,7 +4832,6 @@ class MultiSupplierDownloader:
                 
                 self.logger.info(f"Поставщик {supplier_name}: найдено {len(email_ids)} писем")
                 
-                # Обрабатываем каждое письмо
                 for msg_id in email_ids:
                     try:
                         status, msg_data = mail.fetch(msg_id, '(RFC822)')
@@ -5109,12 +4840,10 @@ class MultiSupplierDownloader:
                         
                         msg = email.message_from_bytes(msg_data[0][1], policy=email_default_policy)
                         
-                        # Получаем информацию о письме
                         subject = msg.get('Subject', '')
                         from_addr = msg.get('From', '')
                         date_str = msg.get('Date', '')
                         
-                        # Обрабатываем вложения
                         for part in msg.walk():
                             content_disposition = str(part.get('Content-Disposition', ''))
                             
@@ -5123,7 +4852,6 @@ class MultiSupplierDownloader:
                                 if not filename:
                                     continue
                                 
-                                # Декодируем имя файла
                                 try:
                                     decoded_parts = decode_header(filename)
                                     filename = ''.join(
@@ -5133,7 +4861,6 @@ class MultiSupplierDownloader:
                                 except:
                                     pass
                                 
-                                # Очищаем имя файла
                                 filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
                                 
                                 content = part.get_payload(decode=True)
@@ -5142,7 +4869,6 @@ class MultiSupplierDownloader:
                                 
                                 ext = Path(filename).suffix.lower()
                                 
-                                # Проверяем, не архив ли это
                                 if ext in self.ARCHIVE_EXTENSIONS:
                                     if ext == '.rar' and not RAR_SUPPORT:
                                         self.logger.warning(f"RAR не поддерживается: {filename}")
@@ -5187,7 +4913,6 @@ class MultiSupplierDownloader:
                         results['errors'].append(error_msg)
                         self.logger.error(f"Поставщик {supplier_name}: {error_msg}")
                 
-                # Помечаем письма как прочитанные
                 if self.config.email_mark_as_read:
                     for msg_id in email_ids:
                         try:
@@ -5202,19 +4927,16 @@ class MultiSupplierDownloader:
                 except:
                     pass
             
-            # Обновляем статус
             if results['errors']:
                 results['status'] = 'partial_success' if results['files_downloaded'] > 0 else 'failed'
             else:
                 results['status'] = 'success'
             
-            # Обновляем статистику поставщика
             supplier.update_stats(
                 success=results['status'] in ['success', 'partial_success'],
                 products_count=results['files_downloaded'] + results['files_extracted']
             )
             
-            # Сохраняем обновленную статистику
             self.config.set_supplier_mapping(supplier_name, supplier.column_mapping)
             
         except Exception as e:
@@ -5233,7 +4955,6 @@ class MultiSupplierDownloader:
         results = []
         
         try:
-            # Создаем временную директорию для распаковки
             extract_id = f"{supplier_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
             extract_dir = self.temp_dir / extract_id
             extract_dir.mkdir(parents=True, exist_ok=True)
@@ -5241,16 +4962,13 @@ class MultiSupplierDownloader:
             temp_archive = self.temp_dir / f"temp_{extract_id}{Path(filename).suffix}"
             
             try:
-                # Сохраняем архив во временный файл
                 with open(temp_archive, 'wb') as f:
                     f.write(content)
                 
                 ext = Path(filename).suffix.lower()
                 
-                # Распаковываем в зависимости от типа архива
                 if ext == '.zip':
                     with zipfile.ZipFile(temp_archive, 'r') as zip_ref:
-                        # Проверяем на наличие вредоносных путей
                         for member in zip_ref.namelist():
                             if member.startswith('/') or '..' in member:
                                 self.logger.warning(f"Подозрительный путь в архиве: {member}")
@@ -5265,7 +4983,6 @@ class MultiSupplierDownloader:
                         mode = 'r:gz'
                     
                     with tarfile.open(temp_archive, mode) as tar_ref:
-                        # Проверяем пути
                         for member in tar_ref.getmembers():
                             if member.name.startswith('/') or '..' in member.name:
                                 self.logger.warning(f"Подозрительный путь в архиве: {member.name}")
@@ -5273,7 +4990,6 @@ class MultiSupplierDownloader:
                         tar_ref.extractall(extract_dir)
                 
                 elif ext == '.gz' and not filename.endswith('.tgz'):
-                    # Одиночный gzip файл
                     output_name = Path(filename).stem
                     output_path = extract_dir / output_name
                     
@@ -5282,7 +4998,6 @@ class MultiSupplierDownloader:
                             shutil.copyfileobj(f_in, f_out)
                 
                 elif ext == '.7z':
-                    # Требуется библиотека py7zr
                     try:
                         import py7zr
                         with py7zr.SevenZipFile(temp_archive, mode='r') as z:
@@ -5298,12 +5013,10 @@ class MultiSupplierDownloader:
                     self.logger.warning(f"Неподдерживаемый формат архива: {ext}")
                     return results
                 
-                # Рекурсивно обрабатываем извлеченные файлы
                 for file_path in extract_dir.rglob('*'):
                     if file_path.is_file():
                         file_ext = file_path.suffix.lower()
                         
-                        # Проверяем, не архив ли внутри архива
                         if file_ext in self.ARCHIVE_EXTENSIONS:
                             with open(file_path, 'rb') as f:
                                 nested_content = f.read()
@@ -5333,11 +5046,9 @@ class MultiSupplierDownloader:
                             )
                 
             finally:
-                # Удаляем временный архив
                 if temp_archive.exists():
                     temp_archive.unlink()
                 
-                # Удаляем временную директорию
                 shutil.rmtree(extract_dir, ignore_errors=True)
             
         except Exception as e:
@@ -5356,23 +5067,19 @@ class MultiSupplierDownloader:
         self.logger.info(f"Загрузка прайсов от {len(self.suppliers)} поставщиков...")
         start_time = time.time()
         
-        # Используем ThreadPoolExecutor для параллельной загрузки
         with ThreadPoolExecutor(max_workers=self.max_concurrent_downloads) as executor:
-            # Создаем задачи для каждого поставщика
             future_to_supplier = {}
             
             for supplier in self.suppliers:
                 future = executor.submit(self.download_from_supplier, supplier)
                 future_to_supplier[future] = supplier.name
             
-            # Собираем результаты по мере выполнения
             for future in as_completed(future_to_supplier):
                 supplier_name = future_to_supplier[future]
                 
                 try:
                     result = future.result(timeout=self.download_timeout)
                     
-                    # Добавляем скачанные файлы в общий список
                     if result['status'] in ['success', 'partial_success']:
                         all_results.extend(result.get('downloaded_files', []))
                     
@@ -5399,7 +5106,6 @@ class MultiSupplierDownloader:
         
         total_duration = time.time() - start_time
         
-        # Формируем сводную статистику
         total_files = len(all_results)
         total_size = sum(f.get('size', 0) for f in all_results)
         
@@ -5484,7 +5190,6 @@ class PriceAnalyzer:
             context={'analysis_id': self.current_analysis_id}
         )
         
-        # Объединяем все данные
         all_data = []
         file_stats = {}
         
@@ -5492,11 +5197,9 @@ class PriceAnalyzer:
             if df.empty:
                 continue
             
-            # Получаем информацию о поставщике
             supplier = df['supplier'].iloc[0] if 'supplier' in df.columns else 'Unknown'
             supplier_email = df['supplier_email'].iloc[0] if 'supplier_email' in df.columns else ''
             
-            # Сохраняем статистику по файлу
             file_stats[filename] = {
                 'supplier': supplier,
                 'rows': len(df),
@@ -5504,7 +5207,6 @@ class PriceAnalyzer:
                 'skus': df['sku'].nunique() if 'sku' in df.columns else 0
             }
             
-            # Добавляем метаданные
             df_copy = df.copy()
             df_copy['supplier'] = supplier
             df_copy['supplier_email'] = supplier_email
@@ -5517,17 +5219,13 @@ class PriceAnalyzer:
             self.logger.warning("Нет данных для объединения")
             return pd.DataFrame()
         
-        # Объединяем все DataFrame'ы
         combined_df = pd.concat(all_data, ignore_index=True)
         
-        # Нормализуем SKU
         combined_df['sku'] = combined_df['sku'].astype(str).str.strip().str.upper()
         
-        # Группируем по SKU и анализируем
         result = []
         
         for sku, group in combined_df.groupby('sku'):
-            # Находим лучшую цену
             valid_prices = group[group['price'] > 0]
             
             if valid_prices.empty:
@@ -5536,7 +5234,6 @@ class PriceAnalyzer:
             min_price_row = valid_prices.loc[valid_prices['price'].idxmin()]
             max_price_row = valid_prices.loc[valid_prices['price'].idxmax()]
             
-            # Собираем информацию о всех ценах
             all_prices = {}
             all_stocks = {}
             all_suppliers = set()
@@ -5551,7 +5248,6 @@ class PriceAnalyzer:
                     all_stocks[supplier] = stock
                     all_suppliers.add(supplier)
             
-            # Рассчитываем метрики
             prices_list = list(all_prices.values())
             stocks_list = list(all_stocks.values())
             
@@ -5563,7 +5259,6 @@ class PriceAnalyzer:
                 'stdev': statistics.stdev(prices_list) if len(prices_list) > 1 else 0
             }
             
-            # Считаем потенциальную экономию
             potential_savings = price_stats['max'] - price_stats['min'] if len(prices_list) > 1 else 0
             savings_percent = (potential_savings / price_stats['max'] * 100) if price_stats['max'] > 0 else 0
             
@@ -5573,62 +5268,49 @@ class PriceAnalyzer:
                 'name': min_price_row.get('name', ''),
                 'category': min_price_row.get('category', ''),
                 
-                # Ценовая информация
                 'min_price': price_stats['min'],
                 'max_price': price_stats['max'],
                 'avg_price': round(price_stats['mean'], 2),
                 'median_price': round(price_stats['median'], 2),
                 'price_std': round(price_stats['stdev'], 2),
                 
-                # Информация о поставщиках
                 'best_supplier': min_price_row.get('supplier', 'Unknown'),
                 'best_supplier_email': min_price_row.get('supplier_email', ''),
                 'worst_supplier': max_price_row.get('supplier', 'Unknown'),
                 'suppliers_count': len(all_suppliers),
                 
-                # Детальная информация
                 'all_suppliers': '; '.join(sorted(all_suppliers)),
                 'all_prices': '; '.join([f"{k}: {v:.2f}" for k, v in sorted(all_prices.items())]),
                 'all_stocks': '; '.join([f"{k}: {v}" for k, v in sorted(all_stocks.items())]),
                 
-                # Метрики выгоды
                 'price_diff': round(potential_savings, 2),
                 'price_diff_percent': round(savings_percent, 2),
                 'total_stock': sum(stocks_list),
                 
-                # Файлы-источники
                 'best_source_file': min_price_row.get('source_file', ''),
                 'analysis_id': self.current_analysis_id,
                 
-                # Дополнительная информация
                 'description': min_price_row.get('description', ''),
                 'weight': min_price_row.get('weight', 0),
                 'barcode': min_price_row.get('barcode', ''),
                 'country': min_price_row.get('country', ''),
                 
-                # Статистика
                 'price_range_ratio': round(price_stats['max'] / price_stats['min'], 2) if price_stats['min'] > 0 else 0
             }
             
             result.append(result_row)
         
-        # Создаем итоговый DataFrame
         result_df = pd.DataFrame(result)
         
         if not result_df.empty:
-            # Сортируем по минимальной цене
             result_df = result_df.sort_values('min_price').reset_index(drop=True)
             
-            # Добавляем колонку с рейтингом цены
             result_df['price_rank'] = result_df.groupby('category')['min_price'].rank(method='dense')
             
-            # Выделяем лучшие предложения
             result_df['is_best_in_category'] = result_df.groupby('category')['min_price'].transform('min') == result_df['min_price']
         
-        # Сохраняем результаты в БД
         db = Database(self.config.db_path)
         
-        # Сохраняем сводную информацию об анализе
         db.save_analysis(
             analysis_id=self.current_analysis_id,
             supplier_count=len(file_stats),
@@ -5646,7 +5328,6 @@ class PriceAnalyzer:
             analysis_config=analysis_config
         )
         
-        # Сохраняем сравнения цен
         for _, row in result_df.iterrows():
             suppliers = row['all_suppliers'].split('; ')
             prices = {}
@@ -5683,7 +5364,6 @@ class PriceAnalyzer:
         """Сравнение с предыдущим анализом"""
         db = Database(self.config.db_path)
         
-        # Получаем данные предыдущего анализа
         with db.get_connection() as conn:
             previous_data = pd.read_sql_query('''
                 SELECT sku, supplier, price, stock 
@@ -5694,7 +5374,6 @@ class PriceAnalyzer:
         if previous_data.empty:
             return current_df
         
-        # Добавляем информацию об изменениях
         changes = []
         
         for _, row in current_df.iterrows():
@@ -5730,7 +5409,6 @@ class PriceAnalyzer:
         if df.empty:
             return pd.DataFrame()
         
-        # Группируем по категориям и находим лучшие цены
         category_stats = df.groupby('category').agg({
             'sku': 'count',
             'min_price': ['min', 'mean', 'max'],
@@ -5756,12 +5434,9 @@ class PriceAnalyzer:
         if df.empty:
             return pd.DataFrame()
         
-        # Анализируем лучшие предложения по поставщикам
         supplier_stats = df['best_supplier'].value_counts().reset_index()
         supplier_stats.columns = ['Поставщик', 'Лучших предложений']
         
-        # Добавляем информацию о средних ценах
-        # Извлекаем цены из колонки all_prices
         supplier_prices = defaultdict(list)
         
         for _, row in df.iterrows():
@@ -5771,7 +5446,6 @@ class PriceAnalyzer:
         avg_prices = {k: statistics.mean(v) for k, v in supplier_prices.items()}
         supplier_stats['Средняя цена'] = supplier_stats['Поставщик'].map(avg_prices).round(2)
         
-        # Процент от общего количества
         total_best = supplier_stats['Лучших предложений'].sum()
         supplier_stats['Доля (%)'] = (supplier_stats['Лучших предложений'] / total_best * 100).round(2)
         
@@ -5786,9 +5460,7 @@ class PriceAnalyzer:
         opportunities = []
         
         for _, row in df.iterrows():
-            # Ищем товары с большой разницей в ценах
             if row['price_diff_percent'] > min_margin_percent:
-                # Парсим цены поставщиков
                 prices = {}
                 for price_info in row['all_prices'].split('; '):
                     if ': ' in price_info:
@@ -5832,27 +5504,21 @@ class PriceAnalyzer:
         filepath = reports_dir / filename
         
         with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            # Основной лист с результатами
             df.to_excel(writer, sheet_name='Анализ цен', index=False)
             
-            # Лучшие цены по категориям
             category_stats = self.get_best_prices_by_category(df)
             category_stats.to_excel(writer, sheet_name='По категориям', index=False)
             
-            # Эффективность поставщиков
             supplier_stats = self.get_supplier_performance(df)
             supplier_stats.to_excel(writer, sheet_name='Поставщики', index=False)
             
-            # Арбитражные возможности
             arbitrage = self.find_arbitrage_opportunities(df)
             if not arbitrage.empty:
                 arbitrage.to_excel(writer, sheet_name='Арбитраж', index=False)
             
-            # Форматируем листы
             for sheet_name in writer.sheets:
                 worksheet = writer.sheets[sheet_name]
                 
-                # Форматируем заголовки
                 header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
                 header_font = Font(color='FFFFFF', bold=True)
                 
@@ -5860,7 +5526,6 @@ class PriceAnalyzer:
                     cell.fill = header_fill
                     cell.font = header_font
                 
-                # Автоподбор ширины
                 for column in worksheet.columns:
                     max_length = 0
                     column_letter = get_column_letter(column[0].column)
@@ -5900,7 +5565,6 @@ class PriceAnalyzer:
             workbook = writer.book
             worksheet = writer.sheets['Анализ цен']
             
-            # Форматирование
             header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
             header_font = Font(color='FFFFFF', bold=True, size=11)
             
@@ -5909,7 +5573,6 @@ class PriceAnalyzer:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            # Условное форматирование для цен
             price_col_letter = None
             for idx, col in enumerate(df.columns):
                 if col == 'min_price':
@@ -5917,34 +5580,28 @@ class PriceAnalyzer:
                     break
             
             if price_col_letter:
-                # Цветовая шкала для цен
                 worksheet.conditional_formatting.add(
                     f'{price_col_letter}2:{price_col_letter}{len(df) + 1}',
                     ColorScaleRule(
-                        start_type='min', start_color='63BE7B',  # Зеленый (низкая цена)
-                        mid_type='percentile', mid_value=50, mid_color='FFEB84',  # Желтый
-                        end_type='max', end_color='F8696B'  # Красный (высокая цена)
+                        start_type='min', start_color='63BE7B',
+                        mid_type='percentile', mid_value=50, mid_color='FFEB84',
+                        end_type='max', end_color='F8696B'
                     )
                 )
             
-            # Добавляем график распределения цен
             if len(df) > 1:
                 chart_sheet = workbook.create_sheet('Графики')
                 
-                # Гистограмма цен
                 chart = BarChart()
                 chart.type = "col"
                 chart.title = "Распределение цен"
                 chart.y_axis.title = 'Количество'
                 chart.x_axis.title = 'Ценовой диапазон'
                 
-                # Создаем данные для гистограммы
                 prices = df['min_price'].dropna()
                 if len(prices) > 0:
-                    # Создаем вспомогательный лист для данных графика
                     data_sheet = workbook.create_sheet('_data')
                     
-                    # Вычисляем бины
                     bins = np.histogram(prices, bins=10)
                     data_sheet['A1'] = 'Диапазон цен'
                     data_sheet['B1'] = 'Количество'
@@ -5961,10 +5618,8 @@ class PriceAnalyzer:
                     
                     chart_sheet.add_chart(chart, "A1")
                     
-                    # Скрываем вспомогательный лист
                     data_sheet.sheet_state = 'hidden'
             
-            # Автоподбор ширины колонок
             for column in worksheet.columns:
                 max_length = 0
                 column_letter = get_column_letter(column[0].column)
@@ -5977,7 +5632,6 @@ class PriceAnalyzer:
                 adjusted_length = min(max_length + 2, 50)
                 worksheet.column_dimensions[column_letter].width = adjusted_length
             
-            # Добавляем автофильтр
             worksheet.auto_filter.ref = f"A1:{get_column_letter(len(df.columns))}{len(df) + 1}"
         
         self.logger.info(f"Результаты экспортированы в Excel: {filepath}")
@@ -6009,7 +5663,6 @@ class NotificationManager:
                 self.logger.warning("Нет получателей для email-уведомления")
                 return False
             
-            # Создаем письмо
             msg = MIMEMultipart()
             msg['From'] = self.config.email_user
             msg['To'] = ', '.join(recipients)
@@ -6017,10 +5670,8 @@ class NotificationManager:
             msg['Date'] = formatdate(localtime=True)
             msg['Message-ID'] = make_msgid()
             
-            # Добавляем тело письма
             msg.attach(MIMEText(body, 'html', 'utf-8'))
             
-            # Добавляем вложения
             if attachments:
                 for filepath in attachments:
                     if os.path.exists(filepath):
@@ -6033,7 +5684,6 @@ class NotificationManager:
                             )
                             msg.attach(attachment)
             
-            # Отправляем письмо
             with smtplib.SMTP_SSL(self.config.imap_server, 465) as server:
                 server.login(self.config.email_user, self.config.email_pass)
                 server.send_message(msg)
@@ -6061,12 +5711,10 @@ class NotificationManager:
             
             url = f"https://api.telegram.org/bot{token}/sendMessage"
             
-            # Разбиваем длинные сообщения
             max_length = 4000
             messages = []
             
             if len(message) > max_length:
-                # Разбиваем по строкам
                 lines = message.split('\n')
                 current_message = ''
                 
@@ -6085,7 +5733,6 @@ class NotificationManager:
             else:
                 messages = [message]
             
-            # Отправляем сообщения
             for i, msg_text in enumerate(messages):
                 payload = {
                     'chat_id': chat_id,
@@ -6100,7 +5747,6 @@ class NotificationManager:
                     self.logger.error(f"Ошибка отправки в Telegram: {response.text}")
                     return False
                 
-                # Задержка между сообщениями
                 if i < len(messages) - 1:
                     time.sleep(0.5)
             
@@ -6116,7 +5762,6 @@ class NotificationManager:
         if not self.notification_config.notify_on_price_changes:
             return
         
-        # Фильтруем значительные изменения
         significant_changes = [
             c for c in changes 
             if abs(c.get('change_percent', 0)) >= self.notification_config.min_price_change_percent
@@ -6125,7 +5770,6 @@ class NotificationManager:
         if not significant_changes:
             return
         
-        # Формируем сообщение
         subject = f"📊 Изменение цен - {len(significant_changes)} товаров"
         
         body = f"""
@@ -6145,7 +5789,7 @@ class NotificationManager:
         </tr>
         """
         
-        for change in significant_changes[:50]:  # Ограничиваем 50 товарами
+        for change in significant_changes[:50]:
             color = 'red' if change.get('new_price', 0) > change.get('old_price', 0) else 'green'
             body += f"""
             <tr>
@@ -6160,13 +5804,12 @@ class NotificationManager:
         
         body += "</table></body></html>"
         
-        # Отправляем уведомления
         self.send_email_notification(subject, body)
         
         telegram_msg = f"📊 <b>Изменение цен</b>\n\n"
         telegram_msg += f"Найдено изменений: <b>{len(significant_changes)}</b>\n\n"
         
-        for change in significant_changes[:10]:  # В Telegram отправляем только топ-10
+        for change in significant_changes[:10]:
             emoji = '🔺' if change.get('new_price', 0) > change.get('old_price', 0) else '🔻'
             telegram_msg += (
                 f"{emoji} <code>{change.get('sku', '')}</code>: "
@@ -6184,7 +5827,6 @@ class NotificationManager:
         if result['status'] in ['failed', 'critical_failed'] and not self.notification_config.notify_on_failure:
             return
         
-        # Формируем тему
         status_emoji = {
             'success': '✅',
             'no_files': 'ℹ️',
@@ -6196,7 +5838,6 @@ class NotificationManager:
         emoji = status_emoji.get(result['status'], '❓')
         subject = f"{emoji} Робот завершил работу - {result['status']}"
         
-        # Формируем тело письма
         body = f"""
         <html>
         <head><meta charset="utf-8"></head>
@@ -6222,10 +5863,8 @@ class NotificationManager:
         
         body += "</body></html>"
         
-        # Отправляем уведомления
         self.send_email_notification(subject, body)
         
-        # Telegram
         telegram_msg = f"{emoji} <b>Робот завершил работу</b>\n\n"
         telegram_msg += f"📁 Файлов: {result.get('files_processed', 0)}\n"
         telegram_msg += f"🔄 Обновлено: {result.get('products_updated', 0)}\n"
@@ -6261,6 +5900,7 @@ class NotificationManager:
         
         self.send_email_notification(subject, body)
 
+
 # ===================================================================
 # БЛОК 14: РАСШИРЕННЫЙ ОСНОВНОЙ РОБОТ
 # ===================================================================
@@ -6281,13 +5921,11 @@ class PriceRobot:
         self.price_analyzer = PriceAnalyzer(config, logger)
         self.mapping_constructor = MappingConstructor(config, logger)
         
-        # Создаем необходимые директории
         for dir_path in [config.uploads_dir, config.archive_dir, config.temp_dir,
                         config.cache_dir, config.backup_dir, config.analysis_dir,
                         config.reports_dir, config.exports_dir]:
             Path(dir_path).mkdir(parents=True, exist_ok=True)
         
-        # Статистика текущего запуска
         self.run_stats = {
             'start_time': time.time(),
             'files_found': 0,
@@ -6309,7 +5947,6 @@ class PriceRobot:
     def _save_and_archive_file(self, filename: str, content: bytes, 
                               supplier: str = '') -> str:
         """Сохранение и архивирование файла"""
-        # Сохраняем в uploads
         safe_filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         upload_filename = f"{timestamp}_{supplier}_{safe_filename}" if supplier else f"{timestamp}_{safe_filename}"
@@ -6318,7 +5955,6 @@ class PriceRobot:
         with open(upload_path, 'wb') as f:
             f.write(content)
         
-        # Архивируем
         archive_path = Path(self.config.archive_dir) / upload_filename
         shutil.copy2(upload_path, archive_path)
         
@@ -6357,7 +5993,6 @@ class PriceRobot:
         start_time = time.time()
         
         try:
-            # Проверяем, не обработан ли уже файл
             if self.db.is_file_processed(content):
                 self.logger.info(f"Файл {filename} уже был обработан, пропускаем")
                 file_result['status'] = 'skipped'
@@ -6365,21 +6000,17 @@ class PriceRobot:
                 self.run_stats['files_skipped'] += 1
                 return file_result
             
-            # Сохраняем файл
             saved_path = self._save_and_archive_file(filename, content, supplier_name)
             
-            # Получаем маппинг для поставщика
             mapping = self.config.get_supplier_mapping(supplier_name)
             supplier_config = self.config.get_supplier_by_name(supplier_name)
             
-            # Получаем правила обработки
             processing_rules = None
             custom_markup = 0
             if supplier_config:
                 processing_rules = supplier_config.processing_rules
                 custom_markup = supplier_config.get_effective_markup(self.config.markup_percent)
             
-            # Парсим файл
             if mapping and any(mapping.values()):
                 df = self.price_parser.parse(filename, content, mapping, processing_rules)
                 self.logger.info(f"Файл {filename} распарсен с сохраненным маппингом")
@@ -6397,13 +6028,11 @@ class PriceRobot:
             
             file_result['products_found'] = len(df)
             
-            # Валидируем данные
             validation = self.price_parser.validate_data(df)
             if not validation.is_valid:
                 file_result['warnings'].extend(validation.errors)
                 file_result['warnings'].extend(validation.warnings)
             
-            # Обрабатываем товары
             updated, added, skipped, price_changes = self._process_products_from_df(
                 df, supplier_name, custom_markup
             )
@@ -6414,7 +6043,6 @@ class PriceRobot:
             file_result['processing_time'] = time.time() - start_time
             file_result['status'] = 'processed'
             
-            # Сохраняем информацию о файле в БД
             self.db.mark_file_processed(
                 filename=filename,
                 file_content=content,
@@ -6453,7 +6081,6 @@ class PriceRobot:
             self.run_stats['files_with_errors'] += 1
             self.run_stats['errors'].append(f"Файл {filename}: {str(e)}")
             
-            # Сохраняем ошибку в БД
             try:
                 self.db.mark_file_processed(
                     filename=filename,
@@ -6485,7 +6112,6 @@ class PriceRobot:
                     skipped += 1
                     continue
                 
-                # Получаем данные из файла
                 base_price = float(row.get('price', 0))
                 stock_from_file = int(row.get('stock', 0))
                 brand = str(row.get('brand', ''))
@@ -6493,38 +6119,31 @@ class PriceRobot:
                 category = str(row.get('category', ''))
                 description = str(row.get('description', ''))
                 
-                # Пропускаем товары с нулевой ценой
                 if base_price <= 0:
                     self.logger.debug(f"Товар {sku}: нулевая цена, пропускаем")
                     skipped += 1
                     continue
                 
-                # Рассчитываем розничную цену
                 retail_price = self._calculate_retail_price(base_price, custom_markup)
                 
-                # Определяем остаток для отправки
                 if stock_from_file < threshold:
                     stock_to_send = 0
                 else:
                     stock_to_send = stock_from_file
                 
-                # Проверяем существование товара в базе
                 existing = self.product_db.get_product_by_sku(sku)
                 
                 if existing:
-                    # Товар существует - обновляем
                     old_price = float(existing.get('цена_розница', 0))
                     old_stock = int(existing.get('остаток', 0))
                     old_base_price = float(existing.get('цена_базовая', 0))
                     
-                    # Определяем, что изменилось
                     update_data = {}
                     
                     if abs(base_price - old_base_price) > 0.01:
                         update_data['цена_базовая'] = base_price
                         update_data['цена_розница'] = retail_price
                         
-                        # Записываем изменение цены
                         price_change = {
                             'sku': sku,
                             'supplier': supplier_name,
@@ -6537,7 +6156,6 @@ class PriceRobot:
                         }
                         price_changes.append(price_change)
                         
-                        # Сохраняем в историю
                         self.db.add_price_history(
                             sku=sku,
                             old_price=old_price,
@@ -6550,7 +6168,6 @@ class PriceRobot:
                     if stock_from_file != old_stock:
                         update_data['остаток'] = stock_to_send
                     
-                    # Обновляем дополнительные поля если они изменились
                     if brand and brand != existing.get('бренд', ''):
                         update_data['бренд'] = brand
                     
@@ -6572,7 +6189,6 @@ class PriceRobot:
                     else:
                         skipped += 1
                 else:
-                    # Товар не существует - создаем новый
                     new_product_data = {
                         'артикул': sku,
                         'цена_базовая': base_price,
@@ -6593,7 +6209,6 @@ class PriceRobot:
                     self.product_db.update_product(sku, **new_product_data)
                     added += 1
                     
-                    # Записываем новый товар в историю
                     self.db.add_price_history(
                         sku=sku,
                         old_price=0,
@@ -6608,7 +6223,6 @@ class PriceRobot:
                 skipped += 1
                 continue
         
-        # Сохраняем изменения цен для уведомлений
         if price_changes:
             self.run_stats['price_changes'].extend(price_changes)
         
@@ -6639,7 +6253,6 @@ class PriceRobot:
         }
         
         try:
-            # Этап 1: Проверка подключений
             if progress_callback:
                 progress_callback("Проверка подключений...")
             
@@ -6647,7 +6260,6 @@ class PriceRobot:
             self.logger.info(f"ЗАПУСК РОБОТА: {run_id}")
             self.logger.info("=" * 60)
             
-            # Проверяем Google Sheets
             self.logger.info("Проверка подключения к Google Sheets...")
             if self.product_db.df is None:
                 self.product_db._load_data()
@@ -6655,7 +6267,6 @@ class PriceRobot:
             stats = self.product_db.get_stats()
             self.logger.info(f"Google Sheets: {stats['total_products']} товаров в базе")
             
-            # Проверяем Яндекс Маркет
             if self.config.yandex_auto_update:
                 self.logger.info("Проверка подключения к Яндекс Маркет...")
                 yandex_ok, yandex_msg = self.yandex_client.test_connection()
@@ -6663,13 +6274,11 @@ class PriceRobot:
                     self.logger.warning(f"Яндекс Маркет недоступен: {yandex_msg}")
                     result['warnings'].append(f"Яндекс Маркет: {yandex_msg}")
             
-            # Этап 2: Загрузка прайсов от поставщиков
             if progress_callback:
                 progress_callback("Загрузка прайсов от поставщиков...")
             
             self.logger.info("Загрузка прайсов от всех поставщиков...")
             
-            # Используем многопоставщичный загрузчик
             downloaded_files = self.multi_supplier_downloader.download_all_suppliers()
             
             result['files_found'] = len(downloaded_files)
@@ -6682,11 +6291,9 @@ class PriceRobot:
             else:
                 self.logger.info(f"Загружено {len(downloaded_files)} файлов от {len(self.run_stats['processed_suppliers'])} поставщиков")
                 
-                # Этап 3: Обработка файлов
                 if progress_callback:
                     progress_callback(f"Обработка {len(downloaded_files)} файлов...")
                 
-                # Обрабатываем файлы (можно параллельно)
                 if self.config.parallel_parsing and len(downloaded_files) > 1:
                     with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
                         futures = []
@@ -6704,7 +6311,6 @@ class PriceRobot:
                             progress_callback(f"Обработка файла {i+1}/{len(downloaded_files)}: {file_data.get('filename', 'unknown')[:50]}")
                         self._process_single_file(file_data)
                 
-                # Обновляем результат
                 result['files_processed'] = self.run_stats['files_processed']
                 result['files_skipped'] = self.run_stats['files_skipped']
                 result['files_with_errors'] = self.run_stats['files_with_errors']
@@ -6712,7 +6318,6 @@ class PriceRobot:
                 result['products_added'] = self.run_stats['products_added']
                 result['price_changes'] = self.run_stats['price_changes']
             
-            # Этап 4: Отправка в Яндекс Маркет
             if self.config.yandex_auto_update:
                 if progress_callback:
                     progress_callback("Подготовка и отправка данных в Яндекс Маркет...")
@@ -6727,7 +6332,6 @@ class PriceRobot:
                 if all_offers:
                     self.logger.info(f"Отправка {len(all_offers)} товаров в Яндекс Маркет...")
                     
-                    # Валидируем офферы перед отправкой
                     valid_offers = self.yandex_client.validate_offers(all_offers)
                     
                     if len(valid_offers) < len(all_offers):
@@ -6735,13 +6339,11 @@ class PriceRobot:
                             f"Отфильтровано {len(all_offers) - len(valid_offers)} некорректных офферов"
                         )
                     
-                    # Отправляем цены и остатки
                     update_result = self.yandex_client.bulk_update_prices_and_stocks(valid_offers)
                     
                     result['offers_sent'] = update_result['prices']['updated']
                     result['offers_failed'] = len(update_result['prices']['errors']) + len(update_result['stocks']['errors'])
                     
-                    # Сохраняем в кэш
                     for offer in valid_offers:
                         self.db.update_sent_cache(
                             sku=offer['sku'],
@@ -6765,7 +6367,6 @@ class PriceRobot:
                     self.logger.warning("Нет товаров для отправки в Яндекс Маркет")
                     result['warnings'].append("База товаров пуста - нечего отправлять")
             
-            # Определяем итоговый статус
             if result['errors']:
                 if result['files_processed'] > 0:
                     result['status'] = 'partial_success'
@@ -6777,7 +6378,6 @@ class PriceRobot:
                 else:
                     result['status'] = 'no_files'
             
-            # Сохраняем статистику запуска
             duration = time.time() - start_time
             result['duration'] = duration
             result['end_time'] = datetime.now().isoformat()
@@ -6800,7 +6400,6 @@ class PriceRobot:
                 triggered_by='user'
             )
             
-            # Отправляем уведомления
             if self.notification_manager.notification_config.enabled:
                 try:
                     self.notification_manager.notify_run_complete(result)
@@ -6835,7 +6434,6 @@ class PriceRobot:
         
         self.logger.info(f"Запуск обработки для поставщика: {supplier_name}")
         
-        # Загружаем файлы поставщика
         downloaded_files = self.multi_supplier_downloader.download_from_supplier(supplier)
         
         if not downloaded_files.get('downloaded_files'):
@@ -6844,7 +6442,6 @@ class PriceRobot:
                 'message': f'Нет новых файлов от поставщика {supplier_name}'
             }
         
-        # Обрабатываем каждый файл
         results = []
         for file_data in downloaded_files['downloaded_files']:
             file_result = self._process_single_file(file_data)
@@ -6861,13 +6458,11 @@ class PriceRobot:
         """Быстрый анализ текущих прайсов"""
         self.logger.info("Запуск быстрого анализа...")
         
-        # Загружаем файлы
         downloaded_files = self.multi_supplier_downloader.download_all_suppliers()
         
         if not downloaded_files:
             return pd.DataFrame()
         
-        # Парсим файлы
         parsed_files = {}
         for file_data in downloaded_files:
             try:
@@ -6894,7 +6489,6 @@ class PriceRobot:
         if not parsed_files:
             return pd.DataFrame()
         
-        # Анализируем
         result_df = self.price_analyzer.analyze(parsed_files)
         
         return result_df
@@ -6931,7 +6525,6 @@ class PriceRobot:
             'errors_today': 0
         }
         
-        # Получаем статистику из БД
         db_stats = self.db.get_stats(1)
         if not db_stats.empty:
             stats['runs_today'] = len(db_stats)
@@ -6939,7 +6532,6 @@ class PriceRobot:
             stats['updates_today'] = db_stats['products_updated'].sum()
             stats['errors_today'] = db_stats['errors'].sum()
         
-        # Получаем статистику товаров
         product_stats = self.product_db.get_stats()
         stats['total_products'] = product_stats['total_products']
         
@@ -6976,16 +6568,13 @@ class PriceRobot:
         
         shutil.copy2(self.config.db_path, backup_file)
         
-        # Сжимаем бэкап
         compressed_file = backup_dir / f"database_backup_{timestamp}.db.gz"
         with open(backup_file, 'rb') as f_in:
             with gzip.open(compressed_file, 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
         
-        # Удаляем несжатый файл
         backup_file.unlink()
         
-        # Удаляем старые бэкапы (оставляем последние 10)
         all_backups = sorted(backup_dir.glob("database_backup_*.db.gz"))
         if len(all_backups) > 10:
             for old_backup in all_backups[:-10]:
@@ -6997,10 +6586,8 @@ class PriceRobot:
     def restore_database(self, backup_file: str) -> bool:
         """Восстановление базы данных из бэкапа"""
         try:
-            # Создаем бэкап текущей базы перед восстановлением
             current_backup = self.backup_database()
             
-            # Восстанавливаем из бэкапа
             if backup_file.endswith('.gz'):
                 with gzip.open(backup_file, 'rb') as f_in:
                     with open(self.config.db_path, 'wb') as f_out:
@@ -7008,7 +6595,6 @@ class PriceRobot:
             else:
                 shutil.copy2(backup_file, self.config.db_path)
             
-            # Пересоздаем подключение к БД
             self.db = Database(self.config.db_path)
             
             self.logger.success(f"База данных восстановлена из {backup_file}")
@@ -7026,7 +6612,6 @@ class PriceRobot:
             'components': {}
         }
         
-        # Проверка БД
         try:
             db_stats = self.db.get_database_stats()
             health['components']['database'] = {
@@ -7041,7 +6626,6 @@ class PriceRobot:
             }
             health['status'] = 'degraded'
         
-        # Проверка Google Sheets
         try:
             product_stats = self.product_db.get_stats()
             health['components']['google_sheets'] = {
@@ -7055,7 +6639,6 @@ class PriceRobot:
             }
             health['status'] = 'degraded'
         
-        # Проверка Яндекс Маркета
         if self.config.yandex_token and self.config.campaign_id:
             try:
                 yandex_ok, yandex_msg = self.yandex_client.test_connection()
@@ -7070,7 +6653,6 @@ class PriceRobot:
                 }
                 health['status'] = 'degraded'
         
-        # Проверка дискового пространства
         try:
             import shutil
             disk_usage = shutil.disk_usage(self.config.uploads_dir)
@@ -7097,1123 +6679,7 @@ class PriceRobot:
 
 
 # ===================================================================
-# БЛОК 15: ИНТЕРФЕЙС STREAMLIT - РАСШИРЕННЫЙ КОНСТРУКТОР МАППИНГА
-# С ПОДДЕРЖКОЙ ЛОКАЛЬНОЙ ЗАГРУЗКИ ФАЙЛОВ
-# ===================================================================
-
-def render_mapping_constructor():
-    """Расширенный интерфейс конструктора маппинга колонок с поддержкой локальной загрузки"""
-    st.subheader("🛠️ Конструктор маппинга колонок")
-    
-    st.markdown("""
-    **Расширенные возможности:**
-    1. 📤 **Локальная загрузка** — загрузите файл прайса с компьютера
-    2. 📧 **Загрузка из почты** — загрузите файл из почты поставщика
-    3. 🔗 **Загрузка по URL** — загрузите файл по ссылке
-    4. 📂 **Образец из архива** — используйте ранее загруженный файл
-    5. 🔍 Автоматическое определение колонок
-    6. 🎯 Ручная настройка соответствия полей
-    7. 📋 Использование готовых шаблонов
-    8. ✅ Валидация маппинга перед сохранением
-    9. 📜 Просмотр истории изменений
-    """)
-    
-    # Инициализация конструктора маппинга
-    if 'mapping_constructor' not in st.session_state:
-        st.session_state.mapping_constructor = MappingConstructor(
-            st.session_state.config,
-            st.session_state.logger
-        )
-    
-    mapping_constructor = st.session_state.mapping_constructor
-    
-    # Вкладки конструктора
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📤 Загрузка и настройка",
-        "📧 Загрузка из почты",
-        "🔍 Автоопределение",
-        "📋 Шаблоны",
-        "📜 История"
-    ])
-    
-    # ===================================================================
-    # ВКЛАДКА 1: ЗАГРУЗКА И НАСТРОЙКА (ЛОКАЛЬНАЯ ЗАГРУЗКА)
-    # ===================================================================
-    with tab1:
-        st.markdown("## 📤 Загрузка прайса для настройки маппинга")
-        st.markdown("Загрузите файл прайса с компьютера для настройки соответствия колонок.")
-        
-        # Выбор поставщика
-        suppliers = st.session_state.config.suppliers
-        supplier_names = [s.get('name', 'Unknown') for s in suppliers]
-        
-        if not supplier_names:
-            st.warning("⚠️ Сначала добавьте поставщика в разделе 'Поставщики'")
-            return
-        
-        selected_supplier = st.selectbox(
-            "Выберите поставщика для настройки",
-            supplier_names,
-            key="mapping_supplier_select_local"
-        )
-        
-        # Информация о текущем маппинге
-        current_mapping = st.session_state.config.get_supplier_mapping(selected_supplier)
-        mapping_stats = mapping_constructor.get_mapping_statistics(selected_supplier)
-        
-        # Отображаем статус маппинга
-        if current_mapping and any(current_mapping.values()):
-            with st.expander("✅ Текущий маппинг поставщика", expanded=True):
-                status_color = "green" if mapping_stats['required_fields_mapped'] else "orange"
-                st.markdown(f"**Статус:** 🔴 Обязательные поля не настроены" if not mapping_stats['required_fields_mapped'] else "**Статус:** 🟢 Все обязательные поля настроены")
-                st.markdown(f"**Настроено полей:** {mapping_stats['mapped_fields_count']} из {mapping_stats['total_possible_fields']}")
-                st.markdown(f"**Последнее обновление:** {mapping_stats.get('last_updated', 'Никогда')[:19] if mapping_stats.get('last_updated') else 'Никогда'}")
-                
-                st.markdown("---")
-                st.markdown("**Соответствие колонок:**")
-                
-                col1, col2 = st.columns(2)
-                mapped_items = [(target, source) for target, source in current_mapping.items() if source]
-                
-                for i, (target, source) in enumerate(mapped_items):
-                    if i % 2 == 0:
-                        with col1:
-                            st.markdown(f"• **{target}** → `{source}`")
-                    else:
-                        with col2:
-                            st.markdown(f"• **{target}** → `{source}`")
-        else:
-            st.info("ℹ️ Маппинг для этого поставщика еще не настроен")
-        
-        st.divider()
-        
-        # ===================================================================
-        # СПОСОБЫ ЗАГРУЗКИ ФАЙЛА
-        # ===================================================================
-        st.subheader("📂 Выберите способ загрузки файла")
-        
-        load_method = st.radio(
-            "Способ загрузки прайса:",
-            [
-                "📤 Загрузить с компьютера (локально)",
-                "📂 Использовать образец из архива",
-                "🔗 Загрузить по URL"
-            ],
-            key="load_method_local",
-            horizontal=True
-        )
-        
-        file_content = None
-        file_filename = None
-        file_loaded = False
-        
-        # ===================================================================
-        # СПОСОБ 1: ЗАГРУЗКА С КОМПЬЮТЕРА
-        # ===================================================================
-        if load_method == "📤 Загрузить с компьютера (локально)":
-            st.markdown("### 📤 Загрузка файла с компьютера")
-            st.markdown("Поддерживаемые форматы: **XLSX, XLS, CSV, XML, JSON, TXT, ODS**")
-            
-            uploaded_file = st.file_uploader(
-                "Выберите файл прайса",
-                type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
-                help="Загрузите файл прайса с вашего компьютера",
-                key="local_file_uploader"
-            )
-            
-            if uploaded_file is not None:
-                file_content = uploaded_file.read()
-                file_filename = uploaded_file.name
-                file_loaded = True
-                
-                # Сохраняем файл локально для истории
-                try:
-                    saved_path = mapping_constructor.save_uploaded_file(file_content, file_filename)
-                    st.success(f"✅ Файл сохранен: `{saved_path}`")
-                except Exception as e:
-                    st.warning(f"⚠️ Не удалось сохранить файл локально: {e}")
-        
-        # ===================================================================
-        # СПОСОБ 2: ИСПОЛЬЗОВАТЬ ОБРАЗЕЦ ИЗ АРХИВА
-        # ===================================================================
-        elif load_method == "📂 Использовать образец из архива":
-            st.markdown("### 📂 Образец из архива поставщика")
-            st.markdown("Будет загружен последний сохраненный файл от этого поставщика.")
-            
-            if st.button("🔍 Найти образец в архиве", key="find_sample_btn", use_container_width=True):
-                with st.spinner("Поиск файлов в архиве..."):
-                    sample = mapping_constructor.load_sample_from_supplier(selected_supplier)
-                    
-                    if sample:
-                        file_content, file_filename = sample
-                        file_loaded = True
-                        st.success(f"✅ Найден файл: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
-                    else:
-                        st.warning(f"⚠️ Не найдено сохраненных файлов для поставщика '{selected_supplier}'")
-                        st.info("💡 Сначала загрузите файл через почту или локально, чтобы он появился в архиве.")
-            
-            # Показываем список доступных файлов
-            with st.expander("📋 Доступные файлы в архиве"):
-                archive_files = mapping_constructor.get_uploaded_files_list()
-                
-                if archive_files:
-                    st.markdown(f"Найдено файлов: {len(archive_files)}")
-                    
-                    for file_info in archive_files[:20]:  # Показываем последние 20
-                        col1, col2, col3 = st.columns([3, 2, 1])
-                        
-                        with col1:
-                            st.markdown(f"📄 `{file_info['filename']}`")
-                        
-                        with col2:
-                            st.markdown(f"📏 {file_info['size_formatted']}")
-                        
-                        with col3:
-                            if st.button("📥 Загрузить", key=f"load_{file_info['filename'][:20]}", use_container_width=True):
-                                try:
-                                    loaded_content, loaded_filename = mapping_constructor.load_file_from_local(
-                                        file_info['filepath']
-                                    )
-                                    file_content = loaded_content
-                                    file_filename = loaded_filename
-                                    file_loaded = True
-                                    st.success(f"✅ Файл загружен!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Ошибка: {e}")
-                else:
-                    st.info("Нет сохраненных файлов")
-        
-        # ===================================================================
-        # СПОСОБ 3: ЗАГРУЗКА ПО URL
-        # ===================================================================
-        elif load_method == "🔗 Загрузить по URL":
-            st.markdown("### 🔗 Загрузка файла по ссылке")
-            st.markdown("Введите прямую ссылку на файл прайса.")
-            
-            url_input = st.text_input(
-                "URL файла",
-                placeholder="https://example.com/pricelist.xlsx",
-                key="url_input_mapping"
-            )
-            
-            custom_filename = st.text_input(
-                "Имя файла (опционально)",
-                placeholder="Если не указано, будет извлечено из URL",
-                key="custom_filename_mapping"
-            )
-            
-            if st.button("🔗 Загрузить по URL", key="load_url_btn", use_container_width=True):
-                if url_input:
-                    with st.spinner("Загрузка файла по URL..."):
-                        try:
-                            filename = custom_filename if custom_filename else None
-                            file_content, file_filename = mapping_constructor.load_file_from_url(
-                                url_input, 
-                                filename
-                            )
-                            file_loaded = True
-                            st.success(f"✅ Файл загружен: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
-                        except Exception as e:
-                            st.error(f"❌ Ошибка загрузки: {str(e)}")
-                else:
-                    st.error("❌ Введите URL файла")
-        
-        st.divider()
-        
-        # ===================================================================
-        # ОБРАБОТКА ЗАГРУЖЕННОГО ФАЙЛА
-        # ===================================================================
-        if file_loaded and file_content is not None and file_filename is not None:
-            try:
-                # Получаем предпросмотр
-                with st.spinner("Анализ файла..."):
-                    df, columns, metadata = mapping_constructor.preview_file(file_content, file_filename)
-                
-                if df.empty:
-                    st.warning("⚠️ Не удалось распарсить файл или файл пуст")
-                    st.stop()
-                
-                # ===================================================================
-                # ИНФОРМАЦИЯ О ФАЙЛЕ
-                # ===================================================================
-                with st.expander("📊 Информация о файле", expanded=True):
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("📄 Строк", metadata.get('row_count', 0))
-                    
-                    with col2:
-                        st.metric("📊 Колонок", metadata.get('column_count', 0))
-                    
-                    with col3:
-                        st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
-                    
-                    with col4:
-                        st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
-                    
-                    # Типы колонок
-                    if metadata.get('column_types'):
-                        st.markdown("**Типы колонок (автоопределение):**")
-                        type_cols = st.columns(3)
-                        for i, (col, col_type) in enumerate(metadata['column_types'].items()):
-                            type_emoji = {
-                                'integer': '🔢',
-                                'decimal': '💲',
-                                'short_text': '📝',
-                                'text': '📄',
-                                'long_text': '📑',
-                                'empty': '🫗'
-                            }.get(col_type, '❓')
-                            
-                            with type_cols[i % 3]:
-                                st.markdown(f"{type_emoji} **{col}**: *{col_type}*")
-                
-                # ===================================================================
-                # ПРЕДПРОСМОТР ДАННЫХ
-                # ===================================================================
-                st.subheader("📋 Предпросмотр данных")
-                
-                preview_rows = st.slider(
-                    "Количество строк для предпросмотра",
-                    min_value=5,
-                    max_value=100,
-                    value=20,
-                    step=5,
-                    key="preview_rows_slider"
-                )
-                
-                st.dataframe(
-                    df.head(preview_rows),
-                    use_container_width=True,
-                    height=400
-                )
-                
-                # Информация о колонках
-                with st.expander("📊 Статистика по колонкам"):
-                    col_stats = []
-                    for col in df.columns:
-                        col_stats.append({
-                            'Колонка': col,
-                            'Тип': metadata['column_types'].get(col, 'unknown'),
-                            'Непустых': len(df) - metadata['null_counts'].get(col, 0),
-                            'Пустых': metadata['null_counts'].get(col, 0),
-                            'Уникальных': metadata['unique_counts'].get(col, 0),
-                            'Пример': ', '.join([str(x) for x in metadata['sample_values'].get(col, [])[:3]])
-                        })
-                    
-                    st.dataframe(
-                        pd.DataFrame(col_stats),
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                
-                # ===================================================================
-                # НАСТРОЙКА МАППИНГА
-                # ===================================================================
-                st.subheader("🎯 Настройка маппинга колонок")
-                st.markdown("Выберите, какая колонка в файле соответствует каждому полю:")
-                
-                # Список доступных колонок для выбора
-                columns_options = [''] + df.columns.tolist()
-                
-                # Функция для получения индекса колонки в списке
-                def get_column_index(column_name: str) -> int:
-                    if column_name and column_name in columns_options:
-                        return columns_options.index(column_name)
-                    return 0
-                
-                # ===================================================================
-                # ОБЯЗАТЕЛЬНЫЕ ПОЛЯ
-                # ===================================================================
-                with st.expander("📌 Обязательные поля", expanded=True):
-                    st.markdown("*Поля, отмеченные звёздочкой (*), обязательны для заполнения*")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        sku_col = st.selectbox(
-                            "📌 Артикул (SKU) *",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('sku', '')),
-                            key="mapping_sku_local",
-                            help="Уникальный идентификатор товара. Обязательное поле."
-                        )
-                    
-                    with col2:
-                        price_col = st.selectbox(
-                            "💰 Цена *",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('price', '')),
-                            key="mapping_price_local",
-                            help="Цена товара. Обязательное поле."
-                        )
-                
-                # ===================================================================
-                # ОСНОВНЫЕ ПОЛЯ
-                # ===================================================================
-                with st.expander("📦 Основные поля", expanded=True):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        stock_col = st.selectbox(
-                            "📦 Остаток",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('stock', '')),
-                            key="mapping_stock_local",
-                            help="Количество товара на складе"
-                        )
-                        
-                        brand_col = st.selectbox(
-                            "🏷️ Бренд",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('brand', '')),
-                            key="mapping_brand_local",
-                            help="Производитель или бренд товара"
-                        )
-                        
-                        category_col = st.selectbox(
-                            "📂 Категория",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('category', '')),
-                            key="mapping_category_local",
-                            help="Категория или раздел товара"
-                        )
-                    
-                    with col2:
-                        name_col = st.selectbox(
-                            "📝 Название",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('name', '')),
-                            key="mapping_name_local",
-                            help="Наименование товара"
-                        )
-                        
-                        description_col = st.selectbox(
-                            "📄 Описание",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('description', '')),
-                            key="mapping_description_local",
-                            help="Описание товара"
-                        )
-                        
-                        barcode_col = st.selectbox(
-                            "🔢 Штрихкод",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('barcode', '')),
-                            key="mapping_barcode_local",
-                            help="Штрихкод или EAN товара"
-                        )
-                
-                # ===================================================================
-                # ДОПОЛНИТЕЛЬНЫЕ ПОЛЯ
-                # ===================================================================
-                with st.expander("📋 Дополнительные поля", expanded=False):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        weight_col = st.selectbox(
-                            "⚖️ Вес",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('weight', '')),
-                            key="mapping_weight_local",
-                            help="Вес товара"
-                        )
-                        
-                        country_col = st.selectbox(
-                            "🌍 Страна",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('country', '')),
-                            key="mapping_country_local",
-                            help="Страна производства"
-                        )
-                        
-                        warranty_col = st.selectbox(
-                            "🛡️ Гарантия",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('warranty', '')),
-                            key="mapping_warranty_local",
-                            help="Срок гарантии"
-                        )
-                        
-                        currency_col = st.selectbox(
-                            "💱 Валюта",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('currency', '')),
-                            key="mapping_currency_local",
-                            help="Валюта цены"
-                        )
-                    
-                    with col2:
-                        dimensions_col = st.selectbox(
-                            "📐 Размеры",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('dimensions', '')),
-                            key="mapping_dimensions_local",
-                            help="Габариты товара"
-                        )
-                        
-                        min_order_col = st.selectbox(
-                            "📦 Мин. заказ",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('min_order_qty', '')),
-                            key="mapping_min_order_local",
-                            help="Минимальное количество для заказа"
-                        )
-                        
-                        vat_col = st.selectbox(
-                            "🧾 НДС",
-                            options=columns_options,
-                            index=get_column_index(current_mapping.get('vat', '')),
-                            key="mapping_vat_local",
-                            help="Ставка НДС"
-                        )
-                
-                # ===================================================================
-                # ПРОВЕРКА ОБЯЗАТЕЛЬНЫХ ПОЛЕЙ
-                # ===================================================================
-                if not sku_col or not price_col:
-                    st.error("❌ **Артикул (SKU)** и **Цена** — обязательные поля. Выберите соответствующие колонки.")
-                else:
-                    # ===================================================================
-                    # ФОРМИРОВАНИЕ МАППИНГА
-                    # ===================================================================
-                    new_mapping = {
-                        'sku': sku_col,
-                        'price': price_col,
-                        'stock': stock_col if stock_col else '',
-                        'brand': brand_col if brand_col else '',
-                        'name': name_col if name_col else '',
-                        'category': category_col if category_col else '',
-                        'description': description_col if description_col else '',
-                        'weight': weight_col if weight_col else '',
-                        'barcode': barcode_col if barcode_col else '',
-                        'country': country_col if country_col else '',
-                        'warranty': warranty_col if warranty_col else '',
-                        'dimensions': dimensions_col if dimensions_col else '',
-                        'min_order_qty': min_order_col if min_order_col else '',
-                        'currency': currency_col if currency_col else '',
-                        'vat': vat_col if vat_col else ''
-                    }
-                    
-                    # Удаляем пустые поля
-                    new_mapping = {k: v for k, v in new_mapping.items() if v}
-                    
-                    # ===================================================================
-                    # ВАЛИДАЦИЯ МАППИНГА
-                    # ===================================================================
-                    validation = mapping_constructor.validate_mapping(df, new_mapping)
-                    
-                    if not validation.is_valid:
-                        st.error("❌ **Ошибки валидации маппинга:**")
-                        for error in validation.errors:
-                            st.error(f"• {error}")
-                    
-                    if validation.warnings:
-                        st.warning("⚠️ **Предупреждения:**")
-                        for warning in validation.warnings:
-                            st.warning(f"• {warning}")
-                    
-                    # ===================================================================
-                    # ПРЕДПРОСМОТР РЕЗУЛЬТАТА МАППИНГА
-                    # ===================================================================
-                    if validation.is_valid:
-                        st.subheader("🔍 Результат маппинга (предпросмотр)")
-                        
-                        # Применяем маппинг
-                        result_df = mapping_constructor.parser._apply_mapping(df.copy(), new_mapping)
-                        
-                        if not result_df.empty:
-                            # Статистика результата
-                            col1, col2, col3, col4 = st.columns(4)
-                            
-                            with col1:
-                                st.metric("📦 Товаров", len(result_df))
-                            
-                            with col2:
-                                valid_prices = (result_df['price'] > 0).sum()
-                                st.metric("💰 С ценой", valid_prices)
-                            
-                            with col3:
-                                with_stock = (result_df['stock'] > 0).sum()
-                                st.metric("📦 В наличии", with_stock)
-                            
-                            with col4:
-                                unique_skus = result_df['sku'].nunique()
-                                st.metric("🔑 Уникальных SKU", unique_skus)
-                            
-                            # Таблица с результатом
-                            st.dataframe(
-                                result_df.head(20),
-                                use_container_width=True,
-                                height=400,
-                                column_config={
-                                    "sku": "Артикул",
-                                    "price": st.column_config.NumberColumn("Цена", format="%.2f"),
-                                    "stock": "Остаток",
-                                    "brand": "Бренд",
-                                    "name": "Название",
-                                    "category": "Категория",
-                                    "description": "Описание"
-                                }
-                            )
-                            
-                            # ===================================================================
-                            # СРАВНЕНИЕ С ТЕКУЩИМ МАППИНГОМ
-                            # ===================================================================
-                            if current_mapping and any(current_mapping.values()):
-                                comparison = mapping_constructor.compare_mappings(current_mapping, new_mapping)
-                                
-                                if comparison['has_changes']:
-                                    with st.expander("🔄 Изменения относительно текущего маппинга", expanded=False):
-                                        st.markdown(f"**Всего изменений:** {comparison['total_changes']}")
-                                        st.markdown(f"• Добавлено полей: {comparison['added_fields']}")
-                                        st.markdown(f"• Удалено полей: {comparison['removed_fields']}")
-                                        st.markdown(f"• Изменено полей: {comparison['modified_fields']}")
-                                        
-                                        for change in comparison['changes']:
-                                            emoji = {
-                                                'added': '➕',
-                                                'removed': '➖',
-                                                'modified': '✏️'
-                                            }.get(change['change_type'], '•')
-                                            
-                                            st.markdown(
-                                                f"{emoji} **{change['field']}**: "
-                                                f"`{change['old_value']}` → `{change['new_value']}`"
-                                            )
-                        
-                        # ===================================================================
-                        # СОХРАНЕНИЕ МАППИНГА
-                        # ===================================================================
-                        st.divider()
-                        st.subheader("💾 Сохранение маппинга")
-                        
-                        col1, col2, col3 = st.columns([2, 1, 1])
-                        
-                        with col1:
-                            save_comment = st.text_input(
-                                "Комментарий к сохранению",
-                                placeholder="Например: Обновлены колонки после нового прайса",
-                                key="save_comment_local"
-                            )
-                        
-                        with col2:
-                            if st.button("💾 Сохранить маппинг", type="primary", use_container_width=True, key="save_mapping_local_btn"):
-                                if mapping_constructor.save_mapping(
-                                    selected_supplier,
-                                    new_mapping,
-                                    created_by='user',
-                                    comment=save_comment
-                                ):
-                                    st.success(f"✅ Маппинг сохранен для поставщика **{selected_supplier}**!")
-                                    st.balloons()
-                                    time.sleep(1)
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Ошибка сохранения маппинга")
-                        
-                        with col3:
-                            if current_mapping and any(current_mapping.values()):
-                                if st.button("🔄 Сбросить", type="secondary", use_container_width=True, key="reset_mapping_local_btn"):
-                                    if st.session_state.get(f"confirm_reset_local", False):
-                                        if mapping_constructor.save_mapping(
-                                            selected_supplier,
-                                            {},
-                                            created_by='user',
-                                            comment='Маппинг сброшен'
-                                        ):
-                                            st.success("✅ Маппинг сброшен")
-                                            st.session_state[f"confirm_reset_local"] = False
-                                            time.sleep(1)
-                                            st.rerun()
-                                    else:
-                                        st.session_state[f"confirm_reset_local"] = True
-                                        st.warning("⚠️ Нажмите еще раз для подтверждения сброса")
-            
-            except Exception as e:
-                st.error(f"❌ Ошибка обработки файла: {str(e)}")
-                st.exception(e)
-    
-    # ===================================================================
-    # ВКЛАДКА 2: ЗАГРУЗКА ИЗ ПОЧТЫ ПОСТАВЩИКА
-    # ===================================================================
-    with tab2:
-        st.markdown("## 📧 Загрузка прайса из почты поставщика")
-        st.markdown("Загрузите файл прайса напрямую из почтового ящика поставщика.")
-        
-        # Выбор поставщика с настроенной почтой
-        email_suppliers = mapping_constructor.get_available_suppliers_for_email()
-        
-        if not email_suppliers:
-            st.warning("⚠️ Нет поставщиков с настроенной почтой. Добавьте email и пароль в разделе 'Поставщики'.")
-            st.info("💡 Вы можете использовать локальную загрузку файла на вкладке '📤 Загрузка и настройка'.")
-        else:
-            email_supplier = st.selectbox(
-                "Выберите поставщика",
-                email_suppliers,
-                key="email_supplier_select"
-            )
-            
-            max_emails = st.slider(
-                "Максимальное количество писем для проверки",
-                min_value=1,
-                max_value=50,
-                value=10,
-                key="max_emails_slider"
-            )
-            
-            if st.button("📧 Загрузить файлы из почты", type="primary", use_container_width=True, key="load_from_email_btn"):
-                with st.spinner(f"Подключение к почте поставщика {email_supplier}..."):
-                    try:
-                        files = mapping_constructor.load_file_from_email(email_supplier, max_emails)
-                        
-                        if not files:
-                            st.warning(f"⚠️ Не найдено файлов в почте поставщика {email_supplier}")
-                        else:
-                            st.success(f"✅ Загружено файлов: {len(files)}")
-                            
-                            # Показываем список загруженных файлов
-                            for i, (content, filename, subject) in enumerate(files):
-                                with st.expander(f"📄 {filename} ({len(content) / 1024:.1f} KB)", expanded=(i == 0)):
-                                    st.markdown(f"**Из письма:** {subject[:100]}")
-                                    st.markdown(f"**Размер:** {len(content) / 1024:.1f} KB")
-                                    
-                                    if st.button("📥 Использовать для настройки", key=f"use_email_file_{i}", use_container_width=True):
-                                        # Переключаемся на вкладку локальной загрузки
-                                        st.session_state['email_file_content'] = content
-                                        st.session_state['email_file_filename'] = filename
-                                        st.success(f"✅ Файл `{filename}` выбран для настройки. Перейдите на вкладку '📤 Загрузка и настройка'.")
-                                        st.rerun()
-                    
-                    except Exception as e:
-                        st.error(f"❌ Ошибка загрузки из почты: {str(e)}")
-    
-    # ===================================================================
-    # ВКЛАДКА 3: АВТООПРЕДЕЛЕНИЕ
-    # ===================================================================
-    with tab3:
-        st.subheader("🔍 Автоматическое определение маппинга")
-        st.markdown("""
-        Загрузите файл, и система автоматически определит соответствие колонок
-        на основе анализа содержимого и названий колонок.
-        """)
-        
-        auto_file = st.file_uploader(
-            "📤 Загрузите файл для автоопределения",
-            type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'ods'],
-            key="auto_mapping_file_uploader"
-        )
-        
-        if auto_file is not None:
-            try:
-                content = auto_file.read()
-                filename = auto_file.name
-                
-                # Сохраняем файл
-                mapping_constructor.save_uploaded_file(content, filename)
-                
-                # Парсим файл
-                with st.spinner("Анализ файла..."):
-                    df = mapping_constructor.parser.parse(filename, content)
-                
-                if not df.empty:
-                    st.subheader("📊 Предпросмотр файла")
-                    st.dataframe(df.head(10), use_container_width=True)
-                    
-                    # Получаем предложения
-                    with st.spinner("Автоопределение колонок..."):
-                        suggestions = mapping_constructor.get_mapping_suggestions(df)
-                    
-                    if suggestions:
-                        st.subheader("💡 Предложенный маппинг")
-                        
-                        # Отображаем предложения
-                        suggestion_data = []
-                        for s in suggestions:
-                            confidence_emoji = (
-                                '🟢' if s['confidence'] >= 80 else
-                                '🟡' if s['confidence'] >= 50 else
-                                '🟠' if s['confidence'] >= 30 else '🔴'
-                            )
-                            suggestion_data.append({
-                                'Поле': s['target'],
-                                'Колонка в файле': s['column'],
-                                'Уверенность': f"{confidence_emoji} {s['confidence']}%",
-                                'Уровень': s['confidence_level'],
-                                'Причины': '; '.join(s['reasons'])
-                            })
-                        
-                        suggestion_df = pd.DataFrame(suggestion_data)
-                        st.dataframe(suggestion_df, use_container_width=True, hide_index=True)
-                        
-                        # Визуализация уверенности
-                        st.subheader("📊 Уверенность определения")
-                        
-                        fig = go.Figure()
-                        fig.add_trace(go.Bar(
-                            x=[s['target'] for s in suggestions],
-                            y=[s['confidence'] for s in suggestions],
-                            text=[f"{s['confidence']}%" for s in suggestions],
-                            textposition='outside',
-                            marker_color=[
-                                'green' if s['confidence'] >= 80 else
-                                'yellow' if s['confidence'] >= 50 else
-                                'orange' if s['confidence'] >= 30 else 'red'
-                                for s in suggestions
-                            ]
-                        ))
-                        fig.update_layout(
-                            title='Уверенность автоопределения по полям',
-                            xaxis_title='Поле',
-                            yaxis_title='Уверенность (%)',
-                            yaxis_range=[0, 105],
-                            height=400
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Кнопка применения
-                        if st.button("✅ Применить предложенный маппинг", type="primary", use_container_width=True):
-                            auto_mapping = {s['target']: s['column'] for s in suggestions}
-                            
-                            if mapping_constructor.save_mapping(
-                                selected_supplier,
-                                auto_mapping,
-                                created_by='auto',
-                                comment='Автоматически определенный маппинг'
-                            ):
-                                st.success("✅ Автоматический маппинг применен!")
-                                st.balloons()
-                                time.sleep(1)
-                                st.rerun()
-                    else:
-                        st.warning("⚠️ Не удалось автоматически определить маппинг")
-                        st.info("💡 Попробуйте настроить маппинг вручную на вкладке '📤 Загрузка и настройка'")
-            
-            except Exception as e:
-                st.error(f"❌ Ошибка: {str(e)}")
-    
-    # ===================================================================
-    # ВКЛАДКА 4: ШАБЛОНЫ
-    # ===================================================================
-    with tab4:
-        st.subheader("📋 Шаблоны маппинга")
-        st.markdown("Используйте готовые шаблоны для быстрой настройки маппинга.")
-        
-        # Отображаем доступные шаблоны
-        templates = mapping_constructor.mapping_templates
-        template_names = list(templates.keys())
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            selected_template = st.selectbox(
-                "Выберите шаблон",
-                template_names,
-                key="template_select_mapping"
-            )
-        
-        if selected_template:
-            template = templates[selected_template]
-            
-            # Описание шаблона
-            template_descriptions = {
-                'standard': 'Стандартный набор полей для большинства поставщиков',
-                'minimal': 'Минимальный набор (только обязательные поля)',
-                'extended': 'Расширенный набор со всеми возможными полями',
-                'yandex_market': 'Формат Яндекс Маркета',
-                'ozon': 'Формат OZON',
-                'wildberries': 'Формат Wildberries',
-                '1c_export': 'Формат выгрузки из 1С'
-            }
-            
-            description = template_descriptions.get(selected_template, 'Пользовательский шаблон')
-            st.markdown(f"**{description}**")
-            
-            st.write("**Поля шаблона:**")
-            template_data = []
-            for field, column in template.items():
-                template_data.append({
-                    'Поле': field,
-                    'Типовая колонка': column,
-                    'Обязательное': '✅' if field in ['sku', 'price'] else '❌'
-                })
-            
-            st.dataframe(
-                pd.DataFrame(template_data),
-                use_container_width=True,
-                hide_index=True
-            )
-            
-            with col2:
-                if st.button("📥 Применить шаблон", use_container_width=True, key="apply_template_btn"):
-                    if mapping_constructor.save_mapping(
-                        selected_supplier,
-                        template,
-                        created_by='template',
-                        comment=f'Применен шаблон: {selected_template}'
-                    ):
-                        st.success(f"✅ Шаблон '{selected_template}' применен!")
-                        st.balloons()
-                        time.sleep(1)
-                        st.rerun()
-        
-        # Создание нового шаблона
-        with st.expander("➕ Создать новый шаблон", expanded=False):
-            new_template_name = st.text_input("Название нового шаблона", key="new_template_name")
-            
-            st.write("Заполните поля шаблона (типовые названия колонок):")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                t_sku = st.text_input("SKU", value="Артикул", key="t_sku")
-                t_price = st.text_input("Цена", value="Цена", key="t_price")
-                t_stock = st.text_input("Остаток", value="Остаток", key="t_stock")
-                t_brand = st.text_input("Бренд", value="Бренд", key="t_brand")
-                t_name = st.text_input("Название", value="Название", key="t_name")
-                t_category = st.text_input("Категория", value="Категория", key="t_category")
-            
-            with col2:
-                t_description = st.text_input("Описание", value="Описание", key="t_description")
-                t_barcode = st.text_input("Штрихкод", value="Штрихкод", key="t_barcode")
-                t_weight = st.text_input("Вес", value="Вес", key="t_weight")
-                t_country = st.text_input("Страна", value="Страна", key="t_country")
-                t_warranty = st.text_input("Гарантия", value="Гарантия", key="t_warranty")
-                t_dimensions = st.text_input("Размеры", value="Размеры", key="t_dimensions")
-            
-            if st.button("💾 Сохранить шаблон", use_container_width=True, key="save_template_btn"):
-                if new_template_name:
-                    new_template = {
-                        'sku': t_sku,
-                        'price': t_price,
-                        'stock': t_stock,
-                        'brand': t_brand,
-                        'name': t_name,
-                        'category': t_category,
-                        'description': t_description,
-                        'barcode': t_barcode,
-                        'weight': t_weight,
-                        'country': t_country,
-                        'warranty': t_warranty,
-                        'dimensions': t_dimensions
-                    }
-                    
-                    mapping_constructor.mapping_templates[new_template_name] = new_template
-                    mapping_constructor.save_templates()
-                    st.success(f"✅ Шаблон '{new_template_name}' сохранен!")
-                    st.rerun()
-                else:
-                    st.error("❌ Введите название шаблона")
-        
-        # Управление шаблонами
-        with st.expander("🗑️ Управление пользовательскими шаблонами", expanded=False):
-            system_templates = ['standard', 'minimal', 'extended', 'yandex_market', 'ozon', 'wildberries', '1c_export']
-            custom_templates = {k: v for k, v in templates.items() if k not in system_templates}
-            
-            if custom_templates:
-                template_to_delete = st.selectbox(
-                    "Выберите шаблон для удаления",
-                    list(custom_templates.keys()),
-                    key="delete_template_select"
-                )
-                
-                if st.button("🗑️ Удалить шаблон", type="secondary", use_container_width=True, key="delete_template_btn"):
-                    if template_to_delete in mapping_constructor.mapping_templates:
-                        del mapping_constructor.mapping_templates[template_to_delete]
-                        mapping_constructor.save_templates()
-                        st.success(f"✅ Шаблон '{template_to_delete}' удален")
-                        st.rerun()
-            else:
-                st.info("Нет пользовательских шаблонов")
-    
-    # ===================================================================
-    # ВКЛАДКА 5: ИСТОРИЯ
-    # ===================================================================
-    with tab5:
-        st.subheader("📜 История изменений маппинга")
-        
-        if selected_supplier:
-            history = st.session_state.config.get_mapping_history(selected_supplier)
-            
-            if history:
-                st.markdown(f"**История изменений для поставщика: {selected_supplier}**")
-                st.markdown(f"**Всего версий:** {len(history)}")
-                
-                for record in reversed(history):
-                    with st.expander(
-                        f"📝 Версия {record.get('version', '?')} — "
-                        f"{record.get('created_at', '')[:19]} "
-                        f"({record.get('created_by', 'system')})",
-                        expanded=(record == history[-1])  # Последняя версия раскрыта
-                    ):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown(f"**Автор:** {record.get('created_by', 'system')}")
-                        
-                        with col2:
-                            st.markdown(f"**Дата:** {record.get('created_at', '')[:19]}")
-                        
-                        if record.get('comment'):
-                            st.markdown(f"**Комментарий:** {record['comment']}")
-                        
-                        if record.get('changes'):
-                            st.markdown("**Изменения в этой версии:**")
-                            for change in record['changes']:
-                                emoji = {
-                                    'added': '➕',
-                                    'removed': '➖',
-                                    'modified': '✏️'
-                                }.get(change.get('change_type', 'modified'), '•')
-                                
-                                st.markdown(
-                                    f"{emoji} **{change['field']}**: "
-                                    f"`{change['old_value']}` → `{change['new_value']}`"
-                                )
-                        
-                        if record.get('mapping'):
-                            st.markdown("**Итоговый маппинг:**")
-                            mapped_fields = {k: v for k, v in record['mapping'].items() if v}
-                            
-                            if mapped_fields:
-                                mapping_df = pd.DataFrame(
-                                    [{'Поле': k, 'Колонка': v} for k, v in mapped_fields.items()]
-                                )
-                                st.dataframe(mapping_df, use_container_width=True, hide_index=True)
-                            else:
-                                st.info("Маппинг пуст")
-            else:
-                st.info(f"История изменений для поставщика '{selected_supplier}' пуста")
-                st.markdown("""
-                💡 **История появляется при сохранении маппинга.**
-                
-                Попробуйте:
-                1. Загрузить файл прайса
-                2. Настроить маппинг
-                3. Сохранить изменения
-                """)
-        
-        # Экспорт/импорт маппинга
-        st.divider()
-        st.subheader("📥 Экспорт / Импорт маппинга")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**Экспорт маппинга:**")
-            
-            export_format = st.selectbox(
-                "Формат экспорта",
-                ['json', 'csv'],
-                key="export_format_select"
-            )
-            
-            if st.button("📤 Экспортировать", use_container_width=True, key="export_mapping_btn"):
-                if current_mapping and any(current_mapping.values()):
-                    filepath = mapping_constructor.export_mapping_config(selected_supplier, export_format)
-                    if filepath:
-                        with open(filepath, 'rb') as f:
-                            file_data = f.read()
-                        
-                        mime_type = "application/json" if export_format == 'json' else "text/csv"
-                        
-                        st.download_button(
-                            f"📥 Скачать {export_format.upper()}",
-                            file_data,
-                            f"mapping_{selected_supplier}.{export_format}",
-                            mime_type,
-                            key="download_exported_mapping"
-                        )
-                else:
-                    st.warning("⚠️ Нет маппинга для экспорта")
-        
-        with col2:
-            st.markdown("**Импорт маппинга:**")
-            
-            imported_file = st.file_uploader(
-                "Загрузите файл маппинга",
-                type=['json', 'csv'],
-                key="import_mapping_file_uploader"
-            )
-            
-            if imported_file is not None:
-                # Сохраняем во временный файл
-                temp_dir = Path(st.session_state.config.temp_dir)
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                temp_path = temp_dir / f"import_mapping_{uuid.uuid4().hex}.{imported_file.name.split('.')[-1]}"
-                
-                with open(temp_path, 'wb') as f:
-                    f.write(imported_file.read())
-                
-                imported_mapping = mapping_constructor.import_mapping_config(str(temp_path))
-                
-                if imported_mapping:
-                    st.success("✅ Маппинг успешно импортирован!")
-                    
-                    st.markdown("**Импортированные поля:**")
-                    import_df = pd.DataFrame(
-                        [{'Поле': k, 'Колонка': v} for k, v in imported_mapping.items()]
-                    )
-                    st.dataframe(import_df, use_container_width=True, hide_index=True)
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if st.button("✅ Применить импортированный маппинг", type="primary", use_container_width=True, key="apply_imported_mapping_btn"):
-                            if mapping_constructor.save_mapping(
-                                selected_supplier,
-                                imported_mapping,
-                                created_by='import',
-                                comment=f'Импортирован из файла {imported_file.name}'
-                            ):
-                                st.success("✅ Маппинг применен!")
-                                st.balloons()
-                                time.sleep(1)
-                                st.rerun()
-                    
-                    with col2:
-                        if st.button("❌ Отменить", use_container_width=True, key="cancel_import_mapping_btn"):
-                            st.rerun()
-                else:
-                    st.error("❌ Не удалось импортировать маппинг из файла")
-                
-                # Удаляем временный файл
-                try:
-                    temp_path.unlink(missing_ok=True)
-                except:
-                    pass
-        
-        # Очистка старых загрузок
-        st.divider()
-        with st.expander("🧹 Очистка временных файлов", expanded=False):
-            uploaded_files = mapping_constructor.get_uploaded_files_list()
-            
-            if uploaded_files:
-                st.markdown(f"**Временных файлов:** {len(uploaded_files)}")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    max_age = st.number_input(
-                        "Максимальный возраст (часов)",
-                        value=24,
-                        min_value=1,
-                        max_value=168,
-                        key="max_age_hours_input"
-                    )
-                
-                with col2:
-                    if st.button("🧹 Очистить старые файлы", use_container_width=True, key="cleanup_uploads_btn"):
-                        cleaned = mapping_constructor.cleanup_old_uploads(max_age)
-                        st.success(f"✅ Очищено {cleaned} файлов")
-                        st.rerun()
-            else:
-                st.info("Нет временных файлов")
-
-
-# ===================================================================
-# БЛОК 16: ИНТЕРФЕЙС STREAMLIT - ОСНОВНОЙ
+# БЛОК 15: ИНТЕРФЕЙС STREAMLIT - ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ===================================================================
 
 def init_session_state() -> None:
@@ -8269,6 +6735,9 @@ def init_session_state() -> None:
     
     if 'auto_refresh' not in st.session_state:
         st.session_state.auto_refresh = False
+    
+    if 'mapping_constructor' not in st.session_state:
+        st.session_state.mapping_constructor = None
 
 
 def save_config() -> None:
@@ -8295,7 +6764,6 @@ def run_robot() -> None:
     if not config.yandex_token or config.campaign_id == 0:
         st.warning("⚠️ Не заполнены настройки Яндекс Маркета (будет пропущена отправка)")
     
-    # Создаем робота
     st.session_state.robot = PriceRobot(config, st.session_state.logger)
     st.session_state.is_running = True
     st.session_state.result = None
@@ -8328,7 +6796,6 @@ def run_robot() -> None:
     def update_progress(msg: str) -> None:
         """Обновление прогресса"""
         st.session_state.progress_message = msg
-        # Увеличиваем прогресс
         if st.session_state.progress_value < 90:
             st.session_state.progress_value += 5
     
@@ -8409,13 +6876,1075 @@ def run_analysis() -> None:
         st.session_state.logger.error(f"Ошибка анализа: {e}")
 
 
+def render_mapping_constructor_ui() -> None:
+    """Интерфейс конструктора маппинга с локальной загрузкой"""
+    st.subheader("🛠️ Конструктор маппинга колонок")
+    
+    st.markdown("""
+    **Расширенные возможности:**
+    1. 📤 **Локальная загрузка** — загрузите файл прайса с компьютера
+    2. 📧 **Загрузка из почты** — загрузите файл из почты поставщика
+    3. 🔗 **Загрузка по URL** — загрузите файл по ссылке
+    4. 📂 **Образец из архива** — используйте ранее загруженный файл
+    5. 🔍 Автоматическое определение колонок
+    6. 🎯 Ручная настройка соответствия полей
+    7. 📋 Использование готовых шаблонов
+    8. ✅ Валидация маппинга перед сохранением
+    9. 📜 Просмотр истории изменений
+    """)
+    
+    if st.session_state.mapping_constructor is None:
+        st.session_state.mapping_constructor = MappingConstructor(
+            st.session_state.config,
+            st.session_state.logger
+        )
+    
+    mapping_constructor = st.session_state.mapping_constructor
+    
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📤 Загрузка и настройка",
+        "📧 Загрузка из почты",
+        "🔍 Автоопределение",
+        "📋 Шаблоны",
+        "📜 История"
+    ])
+    
+    with tab1:
+        st.markdown("## 📤 Загрузка прайса для настройки маппинга")
+        st.markdown("Загрузите файл прайса с компьютера для настройки соответствия колонок.")
+        
+        suppliers = st.session_state.config.suppliers
+        supplier_names = [s.get('name', 'Unknown') for s in suppliers]
+        
+        if not supplier_names:
+            st.warning("⚠️ Сначала добавьте поставщика в разделе 'Поставщики'")
+            return
+        
+        selected_supplier = st.selectbox(
+            "Выберите поставщика для настройки",
+            supplier_names,
+            key="mapping_supplier_select_local"
+        )
+        
+        current_mapping = st.session_state.config.get_supplier_mapping(selected_supplier)
+        mapping_stats = mapping_constructor.get_mapping_statistics(selected_supplier)
+        
+        if current_mapping and any(current_mapping.values()):
+            with st.expander("✅ Текущий маппинг поставщика", expanded=True):
+                status_color = "green" if mapping_stats['required_fields_mapped'] else "orange"
+                if not mapping_stats['required_fields_mapped']:
+                    st.markdown("**Статус:** 🔴 Обязательные поля не настроены")
+                else:
+                    st.markdown("**Статус:** 🟢 Все обязательные поля настроены")
+                st.markdown(f"**Настроено полей:** {mapping_stats['mapped_fields_count']} из {mapping_stats['total_possible_fields']}")
+                st.markdown(f"**Последнее обновление:** {mapping_stats.get('last_updated', 'Никогда')[:19] if mapping_stats.get('last_updated') else 'Никогда'}")
+                
+                st.markdown("---")
+                st.markdown("**Соответствие колонок:**")
+                
+                col1, col2 = st.columns(2)
+                mapped_items = [(target, source) for target, source in current_mapping.items() if source]
+                
+                for i, (target, source) in enumerate(mapped_items):
+                    if i % 2 == 0:
+                        with col1:
+                            st.markdown(f"• **{target}** → `{source}`")
+                    else:
+                        with col2:
+                            st.markdown(f"• **{target}** → `{source}`")
+        else:
+            st.info("ℹ️ Маппинг для этого поставщика еще не настроен")
+        
+        st.divider()
+        
+        st.subheader("📂 Выберите способ загрузки файла")
+        
+        load_method = st.radio(
+            "Способ загрузки прайса:",
+            [
+                "📤 Загрузить с компьютера (локально)",
+                "📂 Использовать образец из архива",
+                "🔗 Загрузить по URL"
+            ],
+            key="load_method_local",
+            horizontal=True
+        )
+        
+        file_content = None
+        file_filename = None
+        file_loaded = False
+        
+        if load_method == "📤 Загрузить с компьютера (локально)":
+            st.markdown("### 📤 Загрузка файла с компьютера")
+            st.markdown("Поддерживаемые форматы: **XLSX, XLS, CSV, XML, JSON, TXT, ODS**")
+            
+            uploaded_file = st.file_uploader(
+                "Выберите файл прайса",
+                type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
+                help="Загрузите файл прайса с вашего компьютера",
+                key="local_file_uploader"
+            )
+            
+            if uploaded_file is not None:
+                file_content = uploaded_file.read()
+                file_filename = uploaded_file.name
+                file_loaded = True
+                
+                try:
+                    saved_path = mapping_constructor.save_uploaded_file(file_content, file_filename)
+                    st.success(f"✅ Файл сохранен: `{saved_path}`")
+                except Exception as e:
+                    st.warning(f"⚠️ Не удалось сохранить файл локально: {e}")
+        
+        elif load_method == "📂 Использовать образец из архива":
+            st.markdown("### 📂 Образец из архива поставщика")
+            st.markdown("Будет загружен последний сохраненный файл от этого поставщика.")
+            
+            if st.button("🔍 Найти образец в архиве", key="find_sample_btn", use_container_width=True):
+                with st.spinner("Поиск файлов в архиве..."):
+                    sample = mapping_constructor.load_sample_from_supplier(selected_supplier)
+                    
+                    if sample:
+                        file_content, file_filename = sample
+                        file_loaded = True
+                        st.success(f"✅ Найден файл: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
+                    else:
+                        st.warning(f"⚠️ Не найдено сохраненных файлов для поставщика '{selected_supplier}'")
+                        st.info("💡 Сначала загрузите файл через почту или локально, чтобы он появился в архиве.")
+            
+            with st.expander("📋 Доступные файлы в архиве"):
+                archive_files = mapping_constructor.get_uploaded_files_list()
+                
+                if archive_files:
+                    st.markdown(f"Найдено файлов: {len(archive_files)}")
+                    
+                    for file_info in archive_files[:20]:
+                        col1, col2, col3 = st.columns([3, 2, 1])
+                        
+                        with col1:
+                            st.markdown(f"📄 `{file_info['filename']}`")
+                        
+                        with col2:
+                            st.markdown(f"📏 {file_info['size_formatted']}")
+                        
+                        with col3:
+                            if st.button("📥 Загрузить", key=f"load_{file_info['filename'][:20]}", use_container_width=True):
+                                try:
+                                    loaded_content, loaded_filename = mapping_constructor.load_file_from_local(
+                                        file_info['filepath']
+                                    )
+                                    file_content = loaded_content
+                                    file_filename = loaded_filename
+                                    file_loaded = True
+                                    st.success(f"✅ Файл загружен!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Ошибка: {e}")
+                else:
+                    st.info("Нет сохраненных файлов")
+        
+        elif load_method == "🔗 Загрузить по URL":
+            st.markdown("### 🔗 Загрузка файла по ссылке")
+            st.markdown("Введите прямую ссылку на файл прайса.")
+            
+            url_input = st.text_input(
+                "URL файла",
+                placeholder="https://example.com/pricelist.xlsx",
+                key="url_input_mapping"
+            )
+            
+            custom_filename = st.text_input(
+                "Имя файла (опционально)",
+                placeholder="Если не указано, будет извлечено из URL",
+                key="custom_filename_mapping"
+            )
+            
+            if st.button("🔗 Загрузить по URL", key="load_url_btn", use_container_width=True):
+                if url_input:
+                    with st.spinner("Загрузка файла по URL..."):
+                        try:
+                            filename = custom_filename if custom_filename else None
+                            file_content, file_filename = mapping_constructor.load_file_from_url(
+                                url_input, 
+                                filename
+                            )
+                            file_loaded = True
+                            st.success(f"✅ Файл загружен: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка загрузки: {str(e)}")
+                else:
+                    st.error("❌ Введите URL файла")
+        
+        st.divider()
+        
+        if file_loaded and file_content is not None and file_filename is not None:
+            try:
+                with st.spinner("Анализ файла..."):
+                    df, columns, metadata = mapping_constructor.preview_file(file_content, file_filename)
+                
+                if df.empty:
+                    st.warning("⚠️ Не удалось распарсить файл или файл пуст")
+                    st.stop()
+                
+                with st.expander("📊 Информация о файле", expanded=True):
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("📄 Строк", metadata.get('row_count', 0))
+                    
+                    with col2:
+                        st.metric("📊 Колонок", metadata.get('column_count', 0))
+                    
+                    with col3:
+                        st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
+                    
+                    with col4:
+                        st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
+                    
+                    if metadata.get('column_types'):
+                        st.markdown("**Типы колонок (автоопределение):**")
+                        type_cols = st.columns(3)
+                        for i, (col, col_type) in enumerate(metadata['column_types'].items()):
+                            type_emoji = {
+                                'integer': '🔢',
+                                'decimal': '💲',
+                                'short_text': '📝',
+                                'text': '📄',
+                                'long_text': '📑',
+                                'empty': '🫗'
+                            }.get(col_type, '❓')
+                            
+                            with type_cols[i % 3]:
+                                st.markdown(f"{type_emoji} **{col}**: *{col_type}*")
+                
+                st.subheader("📋 Предпросмотр данных")
+                
+                preview_rows = st.slider(
+                    "Количество строк для предпросмотра",
+                    min_value=5,
+                    max_value=100,
+                    value=20,
+                    step=5,
+                    key="preview_rows_slider"
+                )
+                
+                st.dataframe(
+                    df.head(preview_rows),
+                    use_container_width=True,
+                    height=400
+                )
+                
+                with st.expander("📊 Статистика по колонкам"):
+                    col_stats = []
+                    for col in df.columns:
+                        col_stats.append({
+                            'Колонка': col,
+                            'Тип': metadata['column_types'].get(col, 'unknown'),
+                            'Непустых': len(df) - metadata['null_counts'].get(col, 0),
+                            'Пустых': metadata['null_counts'].get(col, 0),
+                            'Уникальных': metadata['unique_counts'].get(col, 0),
+                            'Пример': ', '.join([str(x) for x in metadata['sample_values'].get(col, [])[:3]])
+                        })
+                    
+                    st.dataframe(
+                        pd.DataFrame(col_stats),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                
+                st.subheader("🎯 Настройка маппинга колонок")
+                st.markdown("Выберите, какая колонка в файле соответствует каждому полю:")
+                
+                columns_options = [''] + df.columns.tolist()
+                
+                def get_column_index(column_name: str) -> int:
+                    if column_name and column_name in columns_options:
+                        return columns_options.index(column_name)
+                    return 0
+                
+                with st.expander("📌 Обязательные поля", expanded=True):
+                    st.markdown("*Поля, отмеченные звёздочкой (*), обязательны для заполнения*")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        sku_col = st.selectbox(
+                            "📌 Артикул (SKU) *",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('sku', '')),
+                            key="mapping_sku_local",
+                            help="Уникальный идентификатор товара. Обязательное поле."
+                        )
+                    
+                    with col2:
+                        price_col = st.selectbox(
+                            "💰 Цена *",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('price', '')),
+                            key="mapping_price_local",
+                            help="Цена товара. Обязательное поле."
+                        )
+                
+                with st.expander("📦 Основные поля", expanded=True):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        stock_col = st.selectbox(
+                            "📦 Остаток",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('stock', '')),
+                            key="mapping_stock_local",
+                            help="Количество товара на складе"
+                        )
+                        
+                        brand_col = st.selectbox(
+                            "🏷️ Бренд",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('brand', '')),
+                            key="mapping_brand_local",
+                            help="Производитель или бренд товара"
+                        )
+                        
+                        category_col = st.selectbox(
+                            "📂 Категория",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('category', '')),
+                            key="mapping_category_local",
+                            help="Категория или раздел товара"
+                        )
+                    
+                    with col2:
+                        name_col = st.selectbox(
+                            "📝 Название",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('name', '')),
+                            key="mapping_name_local",
+                            help="Наименование товара"
+                        )
+                        
+                        description_col = st.selectbox(
+                            "📄 Описание",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('description', '')),
+                            key="mapping_description_local",
+                            help="Описание товара"
+                        )
+                        
+                        barcode_col = st.selectbox(
+                            "🔢 Штрихкод",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('barcode', '')),
+                            key="mapping_barcode_local",
+                            help="Штрихкод или EAN товара"
+                        )
+                
+                with st.expander("📋 Дополнительные поля", expanded=False):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        weight_col = st.selectbox(
+                            "⚖️ Вес",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('weight', '')),
+                            key="mapping_weight_local",
+                            help="Вес товара"
+                        )
+                        
+                        country_col = st.selectbox(
+                            "🌍 Страна",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('country', '')),
+                            key="mapping_country_local",
+                            help="Страна производства"
+                        )
+                        
+                        warranty_col = st.selectbox(
+                            "🛡️ Гарантия",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('warranty', '')),
+                            key="mapping_warranty_local",
+                            help="Срок гарантии"
+                        )
+                        
+                        currency_col = st.selectbox(
+                            "💱 Валюта",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('currency', '')),
+                            key="mapping_currency_local",
+                            help="Валюта цены"
+                        )
+                    
+                    with col2:
+                        dimensions_col = st.selectbox(
+                            "📐 Размеры",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('dimensions', '')),
+                            key="mapping_dimensions_local",
+                            help="Габариты товара"
+                        )
+                        
+                        min_order_col = st.selectbox(
+                            "📦 Мин. заказ",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('min_order_qty', '')),
+                            key="mapping_min_order_local",
+                            help="Минимальное количество для заказа"
+                        )
+                        
+                        vat_col = st.selectbox(
+                            "🧾 НДС",
+                            options=columns_options,
+                            index=get_column_index(current_mapping.get('vat', '')),
+                            key="mapping_vat_local",
+                            help="Ставка НДС"
+                        )
+                
+                if not sku_col or not price_col:
+                    st.error("❌ **Артикул (SKU)** и **Цена** — обязательные поля. Выберите соответствующие колонки.")
+                else:
+                    new_mapping = {
+                        'sku': sku_col,
+                        'price': price_col,
+                        'stock': stock_col if stock_col else '',
+                        'brand': brand_col if brand_col else '',
+                        'name': name_col if name_col else '',
+                        'category': category_col if category_col else '',
+                        'description': description_col if description_col else '',
+                        'weight': weight_col if weight_col else '',
+                        'barcode': barcode_col if barcode_col else '',
+                        'country': country_col if country_col else '',
+                        'warranty': warranty_col if warranty_col else '',
+                        'dimensions': dimensions_col if dimensions_col else '',
+                        'min_order_qty': min_order_col if min_order_col else '',
+                        'currency': currency_col if currency_col else '',
+                        'vat': vat_col if vat_col else ''
+                    }
+                    
+                    new_mapping = {k: v for k, v in new_mapping.items() if v}
+                    
+                    validation = mapping_constructor.validate_mapping(df, new_mapping)
+                    
+                    if not validation.is_valid:
+                        st.error("❌ **Ошибки валидации маппинга:**")
+                        for error in validation.errors:
+                            st.error(f"• {error}")
+                    
+                    if validation.warnings:
+                        st.warning("⚠️ **Предупреждения:**")
+                        for warning in validation.warnings:
+                            st.warning(f"• {warning}")
+                    
+                    if validation.is_valid:
+                        st.subheader("🔍 Результат маппинга (предпросмотр)")
+                        
+                        result_df = mapping_constructor.parser._apply_mapping(df.copy(), new_mapping)
+                        
+                        if not result_df.empty:
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("📦 Товаров", len(result_df))
+                            
+                            with col2:
+                                valid_prices = (result_df['price'] > 0).sum()
+                                st.metric("💰 С ценой", valid_prices)
+                            
+                            with col3:
+                                with_stock = (result_df['stock'] > 0).sum()
+                                st.metric("📦 В наличии", with_stock)
+                            
+                            with col4:
+                                unique_skus = result_df['sku'].nunique()
+                                st.metric("🔑 Уникальных SKU", unique_skus)
+                            
+                            st.dataframe(
+                                result_df.head(20),
+                                use_container_width=True,
+                                height=400,
+                                column_config={
+                                    "sku": "Артикул",
+                                    "price": st.column_config.NumberColumn("Цена", format="%.2f"),
+                                    "stock": "Остаток",
+                                    "brand": "Бренд",
+                                    "name": "Название",
+                                    "category": "Категория",
+                                    "description": "Описание"
+                                }
+                            )
+                            
+                            if current_mapping and any(current_mapping.values()):
+                                comparison = mapping_constructor.compare_mappings(current_mapping, new_mapping)
+                                
+                                if comparison['has_changes']:
+                                    with st.expander("🔄 Изменения относительно текущего маппинга", expanded=False):
+                                        st.markdown(f"**Всего изменений:** {comparison['total_changes']}")
+                                        st.markdown(f"• Добавлено полей: {comparison['added_fields']}")
+                                        st.markdown(f"• Удалено полей: {comparison['removed_fields']}")
+                                        st.markdown(f"• Изменено полей: {comparison['modified_fields']}")
+                                        
+                                        for change in comparison['changes']:
+                                            emoji = {
+                                                'added': '➕',
+                                                'removed': '➖',
+                                                'modified': '✏️'
+                                            }.get(change['change_type'], '•')
+                                            
+                                            st.markdown(
+                                                f"{emoji} **{change['field']}**: "
+                                                f"`{change['old_value']}` → `{change['new_value']}`"
+                                            )
+                        
+                        st.divider()
+                        st.subheader("💾 Сохранение маппинга")
+                        
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        
+                        with col1:
+                            save_comment = st.text_input(
+                                "Комментарий к сохранению",
+                                placeholder="Например: Обновлены колонки после нового прайса",
+                                key="save_comment_local"
+                            )
+                        
+                        with col2:
+                            if st.button("💾 Сохранить маппинг", type="primary", use_container_width=True, key="save_mapping_local_btn"):
+                                if mapping_constructor.save_mapping(
+                                    selected_supplier,
+                                    new_mapping,
+                                    created_by='user',
+                                    comment=save_comment
+                                ):
+                                    st.success(f"✅ Маппинг сохранен для поставщика **{selected_supplier}**!")
+                                    st.balloons()
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Ошибка сохранения маппинга")
+                        
+                        with col3:
+                            if current_mapping and any(current_mapping.values()):
+                                if st.button("🔄 Сбросить", type="secondary", use_container_width=True, key="reset_mapping_local_btn"):
+                                    if st.session_state.get(f"confirm_reset_local", False):
+                                        if mapping_constructor.save_mapping(
+                                            selected_supplier,
+                                            {},
+                                            created_by='user',
+                                            comment='Маппинг сброшен'
+                                        ):
+                                            st.success("✅ Маппинг сброшен")
+                                            st.session_state[f"confirm_reset_local"] = False
+                                            time.sleep(1)
+                                            st.rerun()
+                                    else:
+                                        st.session_state[f"confirm_reset_local"] = True
+                                        st.warning("⚠️ Нажмите еще раз для подтверждения сброса")
+            
+            except Exception as e:
+                st.error(f"❌ Ошибка обработки файла: {str(e)}")
+                st.exception(e)
+    
+    with tab2:
+        st.markdown("## 📧 Загрузка прайса из почты поставщика")
+        st.markdown("Загрузите файл прайса напрямую из почтового ящика поставщика.")
+        
+        email_suppliers = mapping_constructor.get_available_suppliers_for_email()
+        
+        if not email_suppliers:
+            st.warning("⚠️ Нет поставщиков с настроенной почтой. Добавьте email и пароль в разделе 'Поставщики'.")
+            st.info("💡 Вы можете использовать локальную загрузку файла на вкладке '📤 Загрузка и настройка'.")
+        else:
+            email_supplier = st.selectbox(
+                "Выберите поставщика",
+                email_suppliers,
+                key="email_supplier_select"
+            )
+            
+            max_emails = st.slider(
+                "Максимальное количество писем для проверки",
+                min_value=1,
+                max_value=50,
+                value=10,
+                key="max_emails_slider"
+            )
+            
+            if st.button("📧 Загрузить файлы из почты", type="primary", use_container_width=True, key="load_from_email_btn"):
+                with st.spinner(f"Подключение к почте поставщика {email_supplier}..."):
+                    try:
+                        files = mapping_constructor.load_file_from_email(email_supplier, max_emails)
+                        
+                        if not files:
+                            st.warning(f"⚠️ Не найдено файлов в почте поставщика {email_supplier}")
+                        else:
+                            st.success(f"✅ Загружено файлов: {len(files)}")
+                            
+                            for i, (content, filename, subject) in enumerate(files):
+                                with st.expander(f"📄 {filename} ({len(content) / 1024:.1f} KB)", expanded=(i == 0)):
+                                    st.markdown(f"**Из письма:** {subject[:100]}")
+                                    st.markdown(f"**Размер:** {len(content) / 1024:.1f} KB")
+                                    
+                                    if st.button("📥 Использовать для настройки", key=f"use_email_file_{i}", use_container_width=True):
+                                        st.session_state['email_file_content'] = content
+                                        st.session_state['email_file_filename'] = filename
+                                        st.success(f"✅ Файл `{filename}` выбран для настройки. Перейдите на вкладку '📤 Загрузка и настройка'.")
+                                        st.rerun()
+                    
+                    except Exception as e:
+                        st.error(f"❌ Ошибка загрузки из почты: {str(e)}")
+    
+    with tab3:
+        st.subheader("🔍 Автоматическое определение маппинга")
+        st.markdown("""
+        Загрузите файл, и система автоматически определит соответствие колонок
+        на основе анализа содержимого и названий колонок.
+        """)
+        
+        auto_file = st.file_uploader(
+            "📤 Загрузите файл для автоопределения",
+            type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'ods'],
+            key="auto_mapping_file_uploader"
+        )
+        
+        if auto_file is not None:
+            try:
+                content = auto_file.read()
+                filename = auto_file.name
+                
+                mapping_constructor.save_uploaded_file(content, filename)
+                
+                with st.spinner("Анализ файла..."):
+                    df = mapping_constructor.parser.parse(filename, content)
+                
+                if not df.empty:
+                    st.subheader("📊 Предпросмотр файла")
+                    st.dataframe(df.head(10), use_container_width=True)
+                    
+                    with st.spinner("Автоопределение колонок..."):
+                        suggestions = mapping_constructor.get_mapping_suggestions(df)
+                    
+                    if suggestions:
+                        st.subheader("💡 Предложенный маппинг")
+                        
+                        suggestion_data = []
+                        for s in suggestions:
+                            confidence_emoji = (
+                                '🟢' if s['confidence'] >= 80 else
+                                '🟡' if s['confidence'] >= 50 else
+                                '🟠' if s['confidence'] >= 30 else '🔴'
+                            )
+                            suggestion_data.append({
+                                'Поле': s['target'],
+                                'Колонка в файле': s['column'],
+                                'Уверенность': f"{confidence_emoji} {s['confidence']}%",
+                                'Уровень': s['confidence_level'],
+                                'Причины': '; '.join(s['reasons'])
+                            })
+                        
+                        suggestion_df = pd.DataFrame(suggestion_data)
+                        st.dataframe(suggestion_df, use_container_width=True, hide_index=True)
+                        
+                        st.subheader("📊 Уверенность определения")
+                        
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(
+                            x=[s['target'] for s in suggestions],
+                            y=[s['confidence'] for s in suggestions],
+                            text=[f"{s['confidence']}%" for s in suggestions],
+                            textposition='outside',
+                            marker_color=[
+                                'green' if s['confidence'] >= 80 else
+                                'yellow' if s['confidence'] >= 50 else
+                                'orange' if s['confidence'] >= 30 else 'red'
+                                for s in suggestions
+                            ]
+                        ))
+                        fig.update_layout(
+                            title='Уверенность автоопределения по полям',
+                            xaxis_title='Поле',
+                            yaxis_title='Уверенность (%)',
+                            yaxis_range=[0, 105],
+                            height=400
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        if st.button("✅ Применить предложенный маппинг", type="primary", use_container_width=True):
+                            suppliers = st.session_state.config.suppliers
+                            supplier_names = [s.get('name', 'Unknown') for s in suppliers]
+                            
+                            if supplier_names:
+                                auto_supplier = st.selectbox(
+                                    "Выберите поставщика для применения маппинга",
+                                    supplier_names,
+                                    key="auto_supplier_select"
+                                )
+                                
+                                auto_mapping = {s['target']: s['column'] for s in suggestions}
+                                
+                                if mapping_constructor.save_mapping(
+                                    auto_supplier,
+                                    auto_mapping,
+                                    created_by='auto',
+                                    comment='Автоматически определенный маппинг'
+                                ):
+                                    st.success("✅ Автоматический маппинг применен!")
+                                    st.balloons()
+                                    time.sleep(1)
+                                    st.rerun()
+                    else:
+                        st.warning("⚠️ Не удалось автоматически определить маппинг")
+                        st.info("💡 Попробуйте настроить маппинг вручную на вкладке '📤 Загрузка и настройка'")
+            
+            except Exception as e:
+                st.error(f"❌ Ошибка: {str(e)}")
+    
+    with tab4:
+        st.subheader("📋 Шаблоны маппинга")
+        st.markdown("Используйте готовые шаблоны для быстрой настройки маппинга.")
+        
+        templates = mapping_constructor.mapping_templates
+        template_names = list(templates.keys())
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            selected_template = st.selectbox(
+                "Выберите шаблон",
+                template_names,
+                key="template_select_mapping"
+            )
+        
+        if selected_template:
+            template = templates[selected_template]
+            
+            template_descriptions = {
+                'standard': 'Стандартный набор полей для большинства поставщиков',
+                'minimal': 'Минимальный набор (только обязательные поля)',
+                'extended': 'Расширенный набор со всеми возможными полями',
+                'yandex_market': 'Формат Яндекс Маркета',
+                'ozon': 'Формат OZON',
+                'wildberries': 'Формат Wildberries',
+                '1c_export': 'Формат выгрузки из 1С'
+            }
+            
+            description = template_descriptions.get(selected_template, 'Пользовательский шаблон')
+            st.markdown(f"**{description}**")
+            
+            st.write("**Поля шаблона:**")
+            template_data = []
+            for field, column in template.items():
+                template_data.append({
+                    'Поле': field,
+                    'Типовая колонка': column,
+                    'Обязательное': '✅' if field in ['sku', 'price'] else '❌'
+                })
+            
+            st.dataframe(
+                pd.DataFrame(template_data),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            with col2:
+                if st.button("📥 Применить шаблон", use_container_width=True, key="apply_template_btn"):
+                    suppliers = st.session_state.config.suppliers
+                    supplier_names = [s.get('name', 'Unknown') for s in suppliers]
+                    
+                    if supplier_names:
+                        template_supplier = st.selectbox(
+                            "Выберите поставщика",
+                            supplier_names,
+                            key="template_supplier_select"
+                        )
+                        
+                        if mapping_constructor.save_mapping(
+                            template_supplier,
+                            template,
+                            created_by='template',
+                            comment=f'Применен шаблон: {selected_template}'
+                        ):
+                            st.success(f"✅ Шаблон '{selected_template}' применен!")
+                            st.balloons()
+                            time.sleep(1)
+                            st.rerun()
+        
+        with st.expander("➕ Создать новый шаблон", expanded=False):
+            new_template_name = st.text_input("Название нового шаблона", key="new_template_name")
+            
+            st.write("Заполните поля шаблона (типовые названия колонок):")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                t_sku = st.text_input("SKU", value="Артикул", key="t_sku")
+                t_price = st.text_input("Цена", value="Цена", key="t_price")
+                t_stock = st.text_input("Остаток", value="Остаток", key="t_stock")
+                t_brand = st.text_input("Бренд", value="Бренд", key="t_brand")
+                t_name = st.text_input("Название", value="Название", key="t_name")
+                t_category = st.text_input("Категория", value="Категория", key="t_category")
+            
+            with col2:
+                t_description = st.text_input("Описание", value="Описание", key="t_description")
+                t_barcode = st.text_input("Штрихкод", value="Штрихкод", key="t_barcode")
+                t_weight = st.text_input("Вес", value="Вес", key="t_weight")
+                t_country = st.text_input("Страна", value="Страна", key="t_country")
+                t_warranty = st.text_input("Гарантия", value="Гарантия", key="t_warranty")
+                t_dimensions = st.text_input("Размеры", value="Размеры", key="t_dimensions")
+            
+            if st.button("💾 Сохранить шаблон", use_container_width=True, key="save_template_btn"):
+                if new_template_name:
+                    new_template = {
+                        'sku': t_sku,
+                        'price': t_price,
+                        'stock': t_stock,
+                        'brand': t_brand,
+                        'name': t_name,
+                        'category': t_category,
+                        'description': t_description,
+                        'barcode': t_barcode,
+                        'weight': t_weight,
+                        'country': t_country,
+                        'warranty': t_warranty,
+                        'dimensions': t_dimensions
+                    }
+                    
+                    mapping_constructor.mapping_templates[new_template_name] = new_template
+                    mapping_constructor.save_templates()
+                    st.success(f"✅ Шаблон '{new_template_name}' сохранен!")
+                    st.rerun()
+                else:
+                    st.error("❌ Введите название шаблона")
+        
+        with st.expander("🗑️ Управление пользовательскими шаблонами", expanded=False):
+            system_templates = ['standard', 'minimal', 'extended', 'yandex_market', 'ozon', 'wildberries', '1c_export']
+            custom_templates = {k: v for k, v in templates.items() if k not in system_templates}
+            
+            if custom_templates:
+                template_to_delete = st.selectbox(
+                    "Выберите шаблон для удаления",
+                    list(custom_templates.keys()),
+                    key="delete_template_select"
+                )
+                
+                if st.button("🗑️ Удалить шаблон", type="secondary", use_container_width=True, key="delete_template_btn"):
+                    if template_to_delete in mapping_constructor.mapping_templates:
+                        del mapping_constructor.mapping_templates[template_to_delete]
+                        mapping_constructor.save_templates()
+                        st.success(f"✅ Шаблон '{template_to_delete}' удален")
+                        st.rerun()
+            else:
+                st.info("Нет пользовательских шаблонов")
+    
+    with tab5:
+        st.subheader("📜 История изменений маппинга")
+        
+        suppliers = st.session_state.config.suppliers
+        supplier_names = [s.get('name', 'Unknown') for s in suppliers]
+        
+        if supplier_names:
+            history_supplier = st.selectbox(
+                "Выберите поставщика",
+                supplier_names,
+                key="history_supplier_select"
+            )
+            
+            if history_supplier:
+                history = st.session_state.config.get_mapping_history(history_supplier)
+                
+                if history:
+                    st.markdown(f"**История изменений для поставщика: {history_supplier}**")
+                    st.markdown(f"**Всего версий:** {len(history)}")
+                    
+                    for record in reversed(history):
+                        with st.expander(
+                            f"📝 Версия {record.get('version', '?')} — "
+                            f"{record.get('created_at', '')[:19]} "
+                            f"({record.get('created_by', 'system')})",
+                            expanded=(record == history[-1])
+                        ):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown(f"**Автор:** {record.get('created_by', 'system')}")
+                            
+                            with col2:
+                                st.markdown(f"**Дата:** {record.get('created_at', '')[:19]}")
+                            
+                            if record.get('comment'):
+                                st.markdown(f"**Комментарий:** {record['comment']}")
+                            
+                            if record.get('changes'):
+                                st.markdown("**Изменения в этой версии:**")
+                                for change in record['changes']:
+                                    emoji = {
+                                        'added': '➕',
+                                        'removed': '➖',
+                                        'modified': '✏️'
+                                    }.get(change.get('change_type', 'modified'), '•')
+                                    
+                                    st.markdown(
+                                        f"{emoji} **{change['field']}**: "
+                                        f"`{change['old_value']}` → `{change['new_value']}`"
+                                    )
+                            
+                            if record.get('mapping'):
+                                st.markdown("**Итоговый маппинг:**")
+                                mapped_fields = {k: v for k, v in record['mapping'].items() if v}
+                                
+                                if mapped_fields:
+                                    mapping_df = pd.DataFrame(
+                                        [{'Поле': k, 'Колонка': v} for k, v in mapped_fields.items()]
+                                    )
+                                    st.dataframe(mapping_df, use_container_width=True, hide_index=True)
+                                else:
+                                    st.info("Маппинг пуст")
+                else:
+                    st.info(f"История изменений для поставщика '{history_supplier}' пуста")
+                    st.markdown("""
+                    💡 **История появляется при сохранении маппинга.**
+                    
+                    Попробуйте:
+                    1. Загрузить файл прайса
+                    2. Настроить маппинг
+                    3. Сохранить изменения
+                    """)
+        
+        st.divider()
+        st.subheader("📥 Экспорт / Импорт маппинга")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Экспорт маппинга:**")
+            
+            export_format = st.selectbox(
+                "Формат экспорта",
+                ['json', 'csv'],
+                key="export_format_select"
+            )
+            
+            if supplier_names:
+                export_supplier = st.selectbox(
+                    "Выберите поставщика для экспорта",
+                    supplier_names,
+                    key="export_supplier_select"
+                )
+                
+                if st.button("📤 Экспортировать", use_container_width=True, key="export_mapping_btn"):
+                    current_mapping = st.session_state.config.get_supplier_mapping(export_supplier)
+                    if current_mapping and any(current_mapping.values()):
+                        filepath = mapping_constructor.export_mapping_config(export_supplier, export_format)
+                        if filepath:
+                            with open(filepath, 'rb') as f:
+                                file_data = f.read()
+                            
+                            mime_type = "application/json" if export_format == 'json' else "text/csv"
+                            
+                            st.download_button(
+                                f"📥 Скачать {export_format.upper()}",
+                                file_data,
+                                f"mapping_{export_supplier}.{export_format}",
+                                mime_type,
+                                key="download_exported_mapping"
+                            )
+                    else:
+                        st.warning("⚠️ Нет маппинга для экспорта")
+        
+        with col2:
+            st.markdown("**Импорт маппинга:**")
+            
+            imported_file = st.file_uploader(
+                "Загрузите файл маппинга",
+                type=['json', 'csv'],
+                key="import_mapping_file_uploader"
+            )
+            
+            if imported_file is not None:
+                temp_dir = Path(st.session_state.config.temp_dir)
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                temp_path = temp_dir / f"import_mapping_{uuid.uuid4().hex}.{imported_file.name.split('.')[-1]}"
+                
+                with open(temp_path, 'wb') as f:
+                    f.write(imported_file.read())
+                
+                imported_mapping = mapping_constructor.import_mapping_config(str(temp_path))
+                
+                if imported_mapping:
+                    st.success("✅ Маппинг успешно импортирован!")
+                    
+                    st.markdown("**Импортированные поля:**")
+                    import_df = pd.DataFrame(
+                        [{'Поле': k, 'Колонка': v} for k, v in imported_mapping.items()]
+                    )
+                    st.dataframe(import_df, use_container_width=True, hide_index=True)
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("✅ Применить импортированный маппинг", type="primary", use_container_width=True, key="apply_imported_mapping_btn"):
+                            suppliers = st.session_state.config.suppliers
+                            supplier_names = [s.get('name', 'Unknown') for s in suppliers]
+                            
+                            if supplier_names:
+                                import_supplier = st.selectbox(
+                                    "Выберите поставщика",
+                                    supplier_names,
+                                    key="import_supplier_select"
+                                )
+                                
+                                if mapping_constructor.save_mapping(
+                                    import_supplier,
+                                    imported_mapping,
+                                    created_by='import',
+                                    comment=f'Импортирован из файла {imported_file.name}'
+                                ):
+                                    st.success("✅ Маппинг применен!")
+                                    st.balloons()
+                                    time.sleep(1)
+                                    st.rerun()
+                    
+                    with col2:
+                        if st.button("❌ Отменить", use_container_width=True, key="cancel_import_mapping_btn"):
+                            st.rerun()
+                else:
+                    st.error("❌ Не удалось импортировать маппинг из файла")
+                
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except:
+                    pass
+        
+        st.divider()
+        with st.expander("🧹 Очистка временных файлов", expanded=False):
+            uploaded_files = mapping_constructor.get_uploaded_files_list()
+            
+            if uploaded_files:
+                st.markdown(f"**Временных файлов:** {len(uploaded_files)}")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    max_age = st.number_input(
+                        "Максимальный возраст (часов)",
+                        value=24,
+                        min_value=1,
+                        max_value=168,
+                        key="max_age_hours_input"
+                    )
+                
+                with col2:
+                    if st.button("🧹 Очистить старые файлы", use_container_width=True, key="cleanup_uploads_btn"):
+                        cleaned = mapping_constructor.cleanup_old_uploads(max_age)
+                        st.success(f"✅ Очищено {cleaned} файлов")
+                        st.rerun()
+            else:
+                st.info("Нет временных файлов")
+
+
 def render_supplier_settings() -> None:
     """Расширенный интерфейс управления поставщиками"""
     st.subheader("📋 Управление поставщиками")
     
     suppliers = st.session_state.config.suppliers
     
-    # Статистика
     if suppliers:
         active_count = sum(1 for s in suppliers if s.get('enabled', True))
         with_mapping = sum(1 for s in suppliers if any(s.get('column_mapping', {}).values()))
@@ -8428,7 +7957,6 @@ def render_supplier_settings() -> None:
         with col3:
             st.metric("С настроенным маппингом", with_mapping)
     
-    # Список поставщиков
     if suppliers:
         st.subheader("📋 Список поставщиков")
         
@@ -8455,7 +7983,6 @@ def render_supplier_settings() -> None:
                     else:
                         st.warning("⚠️ Маппинг не настроен")
                     
-                    # Статистика
                     stats = supplier.get('stats', {})
                     if stats:
                         st.write(f"**Успешных синхронизаций:** {stats.get('total_files_processed', 0)}")
@@ -8463,7 +7990,6 @@ def render_supplier_settings() -> None:
                         success_rate = stats.get('success_rate', 0)
                         st.progress(success_rate / 100, text=f"Успешность: {success_rate:.1f}%")
                 
-                # Действия
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
@@ -8497,7 +8023,6 @@ def render_supplier_settings() -> None:
                             st.session_state[f"confirm_delete_{i}"] = True
                             st.warning("⚠️ Нажмите еще раз для подтверждения удаления")
     
-    # Добавление нового поставщика
     with st.expander("➕ Добавить нового поставщика", expanded=not suppliers):
         col1, col2 = st.columns(2)
         
@@ -8553,7 +8078,6 @@ def render_analysis_tab() -> None:
     if 'analysis_result' in st.session_state and st.session_state.analysis_result is not None:
         df = st.session_state.analysis_result
         
-        # Ключевые метрики
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         
         with col1:
@@ -8569,7 +8093,6 @@ def render_analysis_tab() -> None:
         with col6:
             st.metric("💵 Экономия", f"{df['price_diff'].sum():.2f} ₽")
         
-        # Фильтры
         st.subheader("🔍 Фильтры")
         
         col1, col2, col3, col4 = st.columns(4)
@@ -8588,7 +8111,6 @@ def render_analysis_tab() -> None:
         with col4:
             min_diff = st.number_input("Мин. разница цен (%)", value=0.0, step=1.0)
         
-        # Применяем фильтры
         filtered_df = df.copy()
         
         if search_query:
@@ -8605,7 +8127,6 @@ def render_analysis_tab() -> None:
         
         st.subheader(f"📋 Результаты ({len(filtered_df)} товаров)")
         
-        # Вкладки с разными представлениями
         tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Таблица",
             "📈 Графики",
@@ -8632,11 +8153,9 @@ def render_analysis_tab() -> None:
             )
         
         with tab2:
-            # Графики
             col1, col2 = st.columns(2)
             
             with col1:
-                # Топ-10 самых дешевых товаров
                 top_cheap = filtered_df.nsmallest(10, 'min_price')
                 fig = px.bar(
                     top_cheap,
@@ -8650,7 +8169,6 @@ def render_analysis_tab() -> None:
                 st.plotly_chart(fig, use_container_width=True)
             
             with col2:
-                # Распределение цен
                 fig = px.histogram(
                     filtered_df,
                     x='min_price',
@@ -8661,7 +8179,6 @@ def render_analysis_tab() -> None:
                 )
                 st.plotly_chart(fig, use_container_width=True)
             
-            # Сравнение поставщиков
             supplier_performance = filtered_df['best_supplier'].value_counts().head(10)
             fig = px.pie(
                 values=supplier_performance.values,
@@ -8706,7 +8223,6 @@ def render_analysis_tab() -> None:
                 else:
                     st.info("Возможностей для арбитража не найдено (минимальная маржа: 10%)")
         
-        # Экспорт
         st.subheader("📥 Экспорт результатов")
         
         col1, col2, col3 = st.columns(3)
@@ -8748,15 +8264,10 @@ def render_analysis_tab() -> None:
                         )
 
 
-# ===================================================================
-# БЛОК 17: ГЛАВНАЯ ФУНКЦИЯ STREAMLIT
-# ===================================================================
-
 def render_dashboard() -> None:
     """Расширенная панель управления"""
     st.subheader("📊 Панель управления")
     
-    # Системная информация
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -8775,7 +8286,6 @@ def render_dashboard() -> None:
         backup_count = len(list(Path(st.session_state.config.backup_dir).glob('*')))
         st.metric("💿 Резервных копий", backup_count)
     
-    # Статистика запусков
     st.subheader("📈 Статистика запусков")
     
     db = st.session_state.db
@@ -8796,7 +8306,6 @@ def render_dashboard() -> None:
             avg_time = stats['duration_seconds'].mean()
             st.metric("⏱️ Среднее время", f"{avg_time:.1f}с")
         
-        # График запусков
         if len(stats) > 1:
             fig = make_subplots(specs=[[{"secondary_y": True}]])
             
@@ -8818,7 +8327,6 @@ def render_dashboard() -> None:
             
             st.plotly_chart(fig, use_container_width=True)
     
-    # Системные предупреждения
     alerts = db.get_unresolved_alerts()
     if not alerts.empty:
         st.subheader("⚠️ Системные предупреждения")
@@ -8838,7 +8346,6 @@ def render_settings_sidebar() -> None:
     with st.sidebar:
         st.header("⚙️ Настройки")
         
-        # Вкладки настроек
         settings_tab1, settings_tab2, settings_tab3, settings_tab4, settings_tab5 = st.tabs([
             "📧 Почта", "🏪 Маркет", "📊 Sheets", "💰 Цены", "🔔 Уведомления"
         ])
@@ -8902,7 +8409,6 @@ def render_settings_sidebar() -> None:
         if st.button("💾 Сохранить настройки", use_container_width=True, type="primary"):
             config = st.session_state.config
             
-            # Почта
             config.imap_server = st.session_state.imap_server
             config.imap_port = int(st.session_state.imap_port)
             config.email_user = st.session_state.email_user
@@ -8911,23 +8417,19 @@ def render_settings_sidebar() -> None:
             config.email_max_emails = int(st.session_state.email_max_emails)
             config.email_mark_as_read = st.session_state.email_mark_as_read
             
-            # Яндекс
             config.yandex_token = st.session_state.yandex_token
             config.campaign_id = int(st.session_state.campaign_id)
             config.warehouse_id = int(st.session_state.warehouse_id)
             config.yandex_auto_update = st.session_state.yandex_auto_update
             
-            # Google Sheets
             config.google_sheet_id = st.session_state.google_sheet_id
             config.google_sheet_name = st.session_state.google_sheet_name
             
-            # Обработка
             config.markup_percent = float(st.session_state.markup_percent)
             config.min_stock_threshold = int(st.session_state.min_stock_threshold)
             config.max_offers_per_request = int(st.session_state.max_offers_per_request)
             config.max_workers = int(st.session_state.max_workers)
             
-            # Уведомления
             config.notification_config = {
                 'enabled': st.session_state.notifications_enabled,
                 'email_notifications': st.session_state.email_notifications,
@@ -8939,7 +8441,6 @@ def render_settings_sidebar() -> None:
         
         st.divider()
         
-        # Управление роботом
         if st.session_state.is_running:
             st.warning("🔄 Робот выполняется...")
             st.progress(st.session_state.progress_value / 100)
@@ -8953,7 +8454,6 @@ def render_settings_sidebar() -> None:
                 run_robot()
                 st.rerun()
         
-        # Системные действия
         with st.expander("🔧 Системные действия"):
             if st.button("🧹 Очистить временные файлы", use_container_width=True):
                 if st.session_state.robot:
@@ -8978,384 +8478,6 @@ def render_settings_sidebar() -> None:
                     st.success("Данные обновлены")
 
 
-def render_main_content() -> None:
-    """Основное содержимое страницы"""
-    st.markdown("""
-        <style>
-        .main-header {
-            font-size: 2.5rem;
-            font-weight: bold;
-            background: linear-gradient(90deg, #1f77b4, #2ca02c);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 1rem;
-        }
-        .stButton > button {
-            border-radius: 8px;
-            font-weight: bold;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="main-header">🤖 Робот для загрузки и анализа прайсов v11.0</div>', 
-               unsafe_allow_html=True)
-    
-    # Результат последнего запуска
-    if st.session_state.result:
-        result = st.session_state.result
-        
-        status_emoji = {
-            'success': '✅',
-            'no_files': 'ℹ️',
-            'partial_success': '⚠️',
-            'failed': '❌',
-            'critical_failed': '💥'
-        }
-        
-        emoji = status_emoji.get(result['status'], '❓')
-        
-        if result['status'] == 'success':
-            st.success(f"{emoji} Робот успешно выполнил задачу!")
-        elif result['status'] == 'no_files':
-            st.info(f"{emoji} Новых файлов не найдено")
-        elif result['status'] == 'partial_success':
-            st.warning(f"{emoji} Робот выполнен с предупреждениями")
-        else:
-            st.error(f"{emoji} Робот выполнен с ошибками")
-        
-        # Детальные метрики
-        cols = st.columns(8)
-        metrics = [
-            ("📁 Файлов", result.get('files_processed', 0)),
-            ("⏭️ Пропущено", result.get('files_skipped', 0)),
-            ("❌ С ошибками", result.get('files_with_errors', 0)),
-            ("🔄 Обновлено", result.get('products_updated', 0)),
-            ("➕ Добавлено", result.get('products_added', 0)),
-            ("📦 Отправлено", result.get('offers_sent', 0)),
-            ("⏱️ Время", f"{result.get('duration', 0):.1f}с"),
-            ("❌ Ошибок", len(result.get('errors', [])))
-        ]
-        
-        for col, (label, value) in zip(cols, metrics):
-            with col:
-                st.metric(label, value)
-        
-        # Ошибки
-        if result.get('errors'):
-            with st.expander(f"❌ Ошибки ({len(result['errors'])})", expanded=len(result['errors']) > 0):
-                for error in result['errors']:
-                    st.error(f"• {error}")
-        
-        # Предупреждения
-        if result.get('warnings'):
-            with st.expander(f"⚠️ Предупреждения ({len(result['warnings'])})"):
-                for warning in result['warnings']:
-                    st.warning(f"• {warning}")
-    
-    # Основные вкладки
-    main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
-        "📊 Панель управления",
-        "📊 Аналитика прайсов",
-        "🛠️ Маппинг",
-        "📦 База товаров",
-        "📝 Логи"
-    ])
-    
-    with main_tab1:
-        render_dashboard()
-    
-    with main_tab2:
-        analysis_subtab1, analysis_subtab2 = st.tabs(["📊 Анализ цен", "⚙️ Поставщики"])
-        
-        with analysis_subtab1:
-            render_analysis_tab()
-        
-        with analysis_subtab2:
-            render_supplier_settings()
-    
-    with main_tab3:
-        render_mapping_constructor()
-    
-    with main_tab4:
-        st.subheader("📦 База товаров (Google Sheets)")
-        
-        if st.session_state.product_db is None:
-            st.error("❌ Не удалось подключиться к Google Sheets")
-        else:
-            df = st.session_state.product_db.get_all_products()
-            
-            if df.empty:
-                st.warning("База товаров пуста")
-            else:
-                # Статистика
-                stats = st.session_state.product_db.get_stats()
-                
-                col1, col2, col3, col4, col5 = st.columns(5)
-                with col1:
-                    st.metric("📦 Всего", stats['total_products'])
-                with col2:
-                    st.metric("🏷️ Брендов", stats['total_brands'])
-                with col3:
-                    st.metric("💰 Средняя цена", f"{stats['avg_price']:.0f} ₽")
-                with col4:
-                    st.metric("📦 В наличии", stats['products_with_stock'])
-                with col5:
-                    st.metric("💵 Общая стоимость", f"{stats['total_value']:,.0f} ₽")
-                
-                # Ссылка на Google Sheets
-                if st.session_state.config.google_sheet_id:
-                    st.markdown(
-                        f"🔗 [Открыть Google Sheets](https://docs.google.com/spreadsheets/d/"
-                        f"{st.session_state.config.google_sheet_id})"
-                    )
-                
-                # Поиск
-                search_query = st.text_input("🔍 Поиск по базе", 
-                                           placeholder="Введите артикул, бренд или название...")
-                
-                if search_query:
-                    df = st.session_state.product_db.search_products(search_query)
-                    st.write(f"Найдено: {len(df)} товаров")
-                
-                # Таблица товаров
-                st.dataframe(
-                    df,
-                    use_container_width=True,
-                    column_config={
-                        "артикул": "Артикул",
-                        "бренд": "Бренд",
-                        "название": "Название",
-                        "цена_розница": st.column_config.NumberColumn("Цена", format="%.2f ₽"),
-                        "остаток": "Остаток",
-                        "категория": "Категория"
-                    },
-                    height=500,
-                    hide_index=True
-                )
-                
-                # Экспорт
-                if st.button("📥 Экспортировать базу в Excel"):
-                    filepath = st.session_state.product_db.export_to_excel()
-                    with open(filepath, 'rb') as f:
-                        st.download_button(
-                            "📥 Скачать Excel",
-                            f.read(),
-                            os.path.basename(filepath),
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-    
-    with main_tab5:
-        st.subheader("📝 Логи выполнения")
-        
-        # Фильтры логов
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            log_level_filter = st.selectbox(
-                "Уровень",
-                ['ALL', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'SUCCESS', 'DEBUG'],
-                key="log_level_filter"
-            )
-        
-        with col2:
-            log_count = st.number_input("Количество", value=100, step=50, key="log_count")
-        
-        with col3:
-            log_search = st.text_input("Поиск в логах", key="log_search")
-        
-        # Отображение логов
-        log_container = st.container(height=500)
-        
-        with log_container:
-            logs = st.session_state.logger.get_logs(log_count)
-            
-            if log_level_filter != 'ALL':
-                logs = [log for log in logs if log['level'] == log_level_filter]
-            
-            if log_search:
-                logs = [log for log in logs if log_search.lower() in log['message'].lower()]
-            
-            for log in logs:
-                level = log['level']
-                message = log['message']
-                timestamp = log['timestamp'][:19]
-                
-                if level in ['ERROR', 'CRITICAL']:
-                    st.error(f"[{timestamp}] {message}")
-                elif level == 'WARNING':
-                    st.warning(f"[{timestamp}] {message}")
-                elif level == 'SUCCESS':
-                    st.success(f"[{timestamp}] {message}")
-                elif level == 'DEBUG':
-                    st.caption(f"[{timestamp}] {message}")
-                else:
-                    st.info(f"[{timestamp}] {message}")
-        
-        # Экспорт логов
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("📥 Экспорт логов (JSON)", use_container_width=True):
-                filepath = st.session_state.logger.export_logs('json')
-                with open(filepath, 'rb') as f:
-                    st.download_button(
-                        "📥 Скачать JSON",
-                        f.read(),
-                        os.path.basename(filepath),
-                        "application/json"
-                    )
-        
-        with col2:
-            if st.button("🔄 Обновить логи", use_container_width=True):
-                st.rerun()
-
-
-# ===================================================================
-# БЛОК 18: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННАЯ)
-# ===================================================================
-
-def main() -> None:
-    """Главная функция приложения"""
-    try:
-        # Инициализация
-        init_session_state()
-        
-        # Настройка страницы
-        st.set_page_config(
-            page_title="🤖 Робот для прайсов v11.0",
-            page_icon="🤖",
-            layout="wide",
-            initial_sidebar_state="expanded"
-        )
-        
-        # Боковая панель
-        render_settings_sidebar()
-        
-        # Основное содержимое
-        render_main_content()
-        
-        # Автообновление если включено
-        if st.session_state.get('auto_refresh', False):
-            time.sleep(5)
-            st.rerun()
-        
-    except Exception as e:
-        st.error(f"❌ Критическая ошибка в приложении: {e}")
-        st.exception(e)
-        
-        # Попытка восстановления
-        if st.button("🔄 Перезапустить приложение"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-
-
-def render_main_content() -> None:
-    """Основное содержимое страницы (ИСПРАВЛЕННОЕ)"""
-    st.markdown("""
-        <style>
-        .main-header {
-            font-size: 2.5rem;
-            font-weight: bold;
-            background: linear-gradient(90deg, #1f77b4, #2ca02c);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 1rem;
-        }
-        .stButton > button {
-            border-radius: 8px;
-            font-weight: bold;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="main-header">🤖 Робот для загрузки и анализа прайсов v11.0</div>', 
-               unsafe_allow_html=True)
-    
-    # Результат последнего запуска
-    if st.session_state.result:
-        result = st.session_state.result
-        
-        status_emoji = {
-            'success': '✅',
-            'no_files': 'ℹ️',
-            'partial_success': '⚠️',
-            'failed': '❌',
-            'critical_failed': '💥'
-        }
-        
-        emoji = status_emoji.get(result['status'], '❓')
-        
-        if result['status'] == 'success':
-            st.success(f"{emoji} Робот успешно выполнил задачу!")
-        elif result['status'] == 'no_files':
-            st.info(f"{emoji} Новых файлов не найдено")
-        elif result['status'] == 'partial_success':
-            st.warning(f"{emoji} Робот выполнен с предупреждениями")
-        else:
-            st.error(f"{emoji} Робот выполнен с ошибками")
-        
-        # Детальные метрики
-        cols = st.columns(8)
-        metrics = [
-            ("📁 Файлов", result.get('files_processed', 0)),
-            ("⏭️ Пропущено", result.get('files_skipped', 0)),
-            ("❌ С ошибками", result.get('files_with_errors', 0)),
-            ("🔄 Обновлено", result.get('products_updated', 0)),
-            ("➕ Добавлено", result.get('products_added', 0)),
-            ("📦 Отправлено", result.get('offers_sent', 0)),
-            ("⏱️ Время", f"{result.get('duration', 0):.1f}с"),
-            ("❌ Ошибок", len(result.get('errors', [])))
-        ]
-        
-        for col, (label, value) in zip(cols, metrics):
-            with col:
-                st.metric(label, value)
-        
-        # Ошибки
-        if result.get('errors'):
-            with st.expander(f"❌ Ошибки ({len(result['errors'])})", expanded=len(result['errors']) > 0):
-                for error in result['errors']:
-                    st.error(f"• {error}")
-        
-        # Предупреждения
-        if result.get('warnings'):
-            with st.expander(f"⚠️ Предупреждения ({len(result['warnings'])})"):
-                for warning in result['warnings']:
-                    st.warning(f"• {warning}")
-    
-    # Основные вкладки
-    main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
-        "📊 Панель управления",
-        "📊 Аналитика прайсов",
-        "🛠️ Маппинг",  # <-- Теперь здесь будет конструктор маппинга с локальной загрузкой
-        "📦 База товаров",
-        "📝 Логи"
-    ])
-    
-    with main_tab1:
-        render_dashboard()
-    
-    with main_tab2:
-        analysis_subtab1, analysis_subtab2 = st.tabs(["📊 Анализ цен", "⚙️ Поставщики"])
-        
-        with analysis_subtab1:
-            render_analysis_tab()
-        
-        with analysis_subtab2:
-            render_supplier_settings()
-    
-    with main_tab3:
-        # ВЫЗЫВАЕМ КОНСТРУКТОР МАППИНГА С ЛОКАЛЬНОЙ ЗАГРУЗКОЙ
-        render_mapping_constructor()  # <--- ИСПРАВЛЕНИЕ
-    
-    with main_tab4:
-        render_products_tab()
-    
-    with main_tab5:
-        render_logs_tab()
-
-
 def render_products_tab() -> None:
     """Вкладка базы товаров"""
     st.subheader("📦 База товаров (Google Sheets)")
@@ -9368,7 +8490,6 @@ def render_products_tab() -> None:
         if df.empty:
             st.warning("База товаров пуста")
         else:
-            # Статистика
             stats = st.session_state.product_db.get_stats()
             
             col1, col2, col3, col4, col5 = st.columns(5)
@@ -9383,14 +8504,12 @@ def render_products_tab() -> None:
             with col5:
                 st.metric("💵 Общая стоимость", f"{stats['total_value']:,.0f} ₽")
             
-            # Ссылка на Google Sheets
             if st.session_state.config.google_sheet_id:
                 st.markdown(
                     f"🔗 [Открыть Google Sheets](https://docs.google.com/spreadsheets/d/"
                     f"{st.session_state.config.google_sheet_id})"
                 )
             
-            # Поиск
             search_query = st.text_input("🔍 Поиск по базе", 
                                        placeholder="Введите артикул, бренд или название...")
             
@@ -9398,7 +8517,6 @@ def render_products_tab() -> None:
                 df = st.session_state.product_db.search_products(search_query)
                 st.write(f"Найдено: {len(df)} товаров")
             
-            # Таблица товаров
             st.dataframe(
                 df,
                 use_container_width=True,
@@ -9414,7 +8532,6 @@ def render_products_tab() -> None:
                 hide_index=True
             )
             
-            # Экспорт
             if st.button("📥 Экспортировать базу в Excel"):
                 filepath = st.session_state.product_db.export_to_excel()
                 with open(filepath, 'rb') as f:
@@ -9430,7 +8547,6 @@ def render_logs_tab() -> None:
     """Вкладка логов"""
     st.subheader("📝 Логи выполнения")
     
-    # Фильтры логов
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -9446,7 +8562,6 @@ def render_logs_tab() -> None:
     with col3:
         log_search = st.text_input("Поиск в логах", key="log_search")
     
-    # Отображение логов
     log_container = st.container(height=500)
     
     with log_container:
@@ -9474,7 +8589,6 @@ def render_logs_tab() -> None:
             else:
                 st.info(f"[{timestamp}] {message}")
     
-    # Экспорт логов
     col1, col2 = st.columns(2)
     
     with col1:
@@ -9493,8 +8607,142 @@ def render_logs_tab() -> None:
             st.rerun()
 
 
+def render_main_content() -> None:
+    """Основное содержимое страницы"""
+    st.markdown("""
+        <style>
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: linear-gradient(90deg, #1f77b4, #2ca02c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+        .stButton > button {
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="main-header">🤖 Робот для загрузки и анализа прайсов v11.0</div>', 
+               unsafe_allow_html=True)
+    
+    if st.session_state.result:
+        result = st.session_state.result
+        
+        status_emoji = {
+            'success': '✅',
+            'no_files': 'ℹ️',
+            'partial_success': '⚠️',
+            'failed': '❌',
+            'critical_failed': '💥'
+        }
+        
+        emoji = status_emoji.get(result['status'], '❓')
+        
+        if result['status'] == 'success':
+            st.success(f"{emoji} Робот успешно выполнил задачу!")
+        elif result['status'] == 'no_files':
+            st.info(f"{emoji} Новых файлов не найдено")
+        elif result['status'] == 'partial_success':
+            st.warning(f"{emoji} Робот выполнен с предупреждениями")
+        else:
+            st.error(f"{emoji} Робот выполнен с ошибками")
+        
+        cols = st.columns(8)
+        metrics = [
+            ("📁 Файлов", result.get('files_processed', 0)),
+            ("⏭️ Пропущено", result.get('files_skipped', 0)),
+            ("❌ С ошибками", result.get('files_with_errors', 0)),
+            ("🔄 Обновлено", result.get('products_updated', 0)),
+            ("➕ Добавлено", result.get('products_added', 0)),
+            ("📦 Отправлено", result.get('offers_sent', 0)),
+            ("⏱️ Время", f"{result.get('duration', 0):.1f}с"),
+            ("❌ Ошибок", len(result.get('errors', [])))
+        ]
+        
+        for col, (label, value) in zip(cols, metrics):
+            with col:
+                st.metric(label, value)
+        
+        if result.get('errors'):
+            with st.expander(f"❌ Ошибки ({len(result['errors'])})", expanded=len(result['errors']) > 0):
+                for error in result['errors']:
+                    st.error(f"• {error}")
+        
+        if result.get('warnings'):
+            with st.expander(f"⚠️ Предупреждения ({len(result['warnings'])})"):
+                for warning in result['warnings']:
+                    st.warning(f"• {warning}")
+    
+    main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
+        "📊 Панель управления",
+        "📊 Аналитика прайсов",
+        "🛠️ Маппинг",
+        "📦 База товаров",
+        "📝 Логи"
+    ])
+    
+    with main_tab1:
+        render_dashboard()
+    
+    with main_tab2:
+        analysis_subtab1, analysis_subtab2 = st.tabs(["📊 Анализ цен", "⚙️ Поставщики"])
+        
+        with analysis_subtab1:
+            render_analysis_tab()
+        
+        with analysis_subtab2:
+            render_supplier_settings()
+    
+    with main_tab3:
+        render_mapping_constructor_ui()
+    
+    with main_tab4:
+        render_products_tab()
+    
+    with main_tab5:
+        render_logs_tab()
+
+
 # ===================================================================
-# БЛОК 19: ТОЧКА ВХОДА И ЗАПУСК ИЗ КОМАНДНОЙ СТРОКИ
+# БЛОК 16: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+# ===================================================================
+
+def main() -> None:
+    """Главная функция приложения"""
+    try:
+        init_session_state()
+        
+        st.set_page_config(
+            page_title="🤖 Робот для прайсов v11.0",
+            page_icon="🤖",
+            layout="wide",
+            initial_sidebar_state="expanded"
+        )
+        
+        render_settings_sidebar()
+        
+        render_main_content()
+        
+        if st.session_state.get('auto_refresh', False):
+            time.sleep(5)
+            st.rerun()
+        
+    except Exception as e:
+        st.error(f"❌ Критическая ошибка в приложении: {e}")
+        st.exception(e)
+        
+        if st.button("🔄 Перезапустить приложение"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+
+# ===================================================================
+# БЛОК 17: ТОЧКА ВХОДА И ЗАПУСК ИЗ КОМАНДНОЙ СТРОКИ
 # ===================================================================
 
 def run_cli():
@@ -9511,11 +8759,9 @@ def run_cli():
     
     args = parser.parse_args()
     
-    # Загружаем конфигурацию
     config = Config.load()
     logger = StreamlitLogger()
     
-    # Создаем робота
     robot = PriceRobot(config, logger)
     
     if args.mode == 'run':
@@ -9551,10 +8797,7 @@ def run_cli():
 
 
 if __name__ == "__main__":
-    # Определяем режим запуска
     if len(sys.argv) > 1:
-        # Запуск из командной строки
         run_cli()
     else:
-        # Запуск Streamlit приложения
         main()
