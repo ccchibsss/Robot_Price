@@ -6253,8 +6253,13 @@ def render_dashboard() -> None:
             
             st.warning(f"{severity_color} **{alert['title']}** - {alert['created_at'][:19]}")
 
-def render_supplier_settings() -> None:
-    """Расширенный интерфейс управления поставщиками"""
+def render_supplier_settings(prefix: str = "") -> None:
+    """
+    Расширенный интерфейс управления поставщиками.
+    
+    Args:
+        prefix: Префикс для ключей элементов (чтобы избежать дублирования при вызове из разных мест)
+    """
     st.subheader("📋 Управление поставщиками")
     
     suppliers = st.session_state.config.suppliers
@@ -6307,7 +6312,7 @@ def render_supplier_settings() -> None:
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.button("🔄 Синхронизировать", key=f"sync_supplier_{i}", use_container_width=True):
+                    if st.button("🔄 Синхронизировать", key=f"sync_supplier_{prefix}_{i}", use_container_width=True):
                         robot = PriceRobot(st.session_state.config, st.session_state.logger)
                         result = robot.run_single_supplier(supplier.get('name', ''))
                         if result['status'] == 'success':
@@ -6319,7 +6324,7 @@ def render_supplier_settings() -> None:
                     new_enabled = not supplier.get('enabled', True)
                     if st.button(
                         "🔴 Деактивировать" if supplier.get('enabled', True) else "🟢 Активировать",
-                        key=f"toggle_supplier_{i}",
+                        key=f"toggle_supplier_{prefix}_{i}",
                         use_container_width=True
                     ):
                         supplier['enabled'] = new_enabled
@@ -6327,34 +6332,34 @@ def render_supplier_settings() -> None:
                         st.rerun()
                 
                 with col3:
-                    if st.button("🗑️ Удалить", key=f"delete_supplier_{i}", use_container_width=True):
-                        if st.session_state.get(f"confirm_delete_supplier_{i}", False):
+                    if st.button("🗑️ Удалить", key=f"delete_supplier_{prefix}_{i}", use_container_width=True):
+                        if st.session_state.get(f"confirm_delete_supplier_{prefix}_{i}", False):
                             st.session_state.config.suppliers.pop(i)
                             st.session_state.config._save_suppliers()
                             st.success("✅ Поставщик удален")
                             st.rerun()
                         else:
-                            st.session_state[f"confirm_delete_supplier_{i}"] = True
+                            st.session_state[f"confirm_delete_supplier_{prefix}_{i}"] = True
                             st.warning("⚠️ Нажмите еще раз для подтверждения удаления")
     
     with st.expander("➕ Добавить нового поставщика", expanded=not suppliers):
         col1, col2 = st.columns(2)
         
         with col1:
-            new_name = st.text_input("Название поставщика*", key="new_supplier_name_main")
-            new_email = st.text_input("Email*", key="new_supplier_email_main")
-            new_password = st.text_input("Пароль*", type="password", key="new_supplier_password_main")
-            new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key="new_supplier_imap_main")
-            new_port = st.number_input("IMAP порт", value=993, step=1, key="new_supplier_port_main")
+            new_name = st.text_input("Название поставщика*", key=f"new_supplier_name_{prefix}")
+            new_email = st.text_input("Email*", key=f"new_supplier_email_{prefix}")
+            new_password = st.text_input("Пароль*", type="password", key=f"new_supplier_password_{prefix}")
+            new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key=f"new_supplier_imap_{prefix}")
+            new_port = st.number_input("IMAP порт", value=993, step=1, key=f"new_supplier_port_{prefix}")
         
         with col2:
-            new_subject = st.text_input("Фильтр по теме", placeholder="прайс", key="new_supplier_subject_main")
-            new_sender = st.text_input("Фильтр по отправителю", key="new_supplier_sender_main")
-            new_priority = st.number_input("Приоритет", value=0, step=1, key="new_supplier_priority_main")
-            new_markup = st.number_input("Индивидуальная наценка (%)", value=0.0, step=0.5, key="new_supplier_markup_main")
-            new_enabled = st.checkbox("Активен", value=True, key="new_supplier_enabled_main")
+            new_subject = st.text_input("Фильтр по теме", placeholder="прайс", key=f"new_supplier_subject_{prefix}")
+            new_sender = st.text_input("Фильтр по отправителю", key=f"new_supplier_sender_{prefix}")
+            new_priority = st.number_input("Приоритет", value=0, step=1, key=f"new_supplier_priority_{prefix}")
+            new_markup = st.number_input("Индивидуальная наценка (%)", value=0.0, step=0.5, key=f"new_supplier_markup_{prefix}")
+            new_enabled = st.checkbox("Активен", value=True, key=f"new_supplier_enabled_{prefix}")
         
-        if st.button("✅ Добавить поставщика", type="primary", use_container_width=True, key="add_supplier_main_btn"):
+        if st.button("✅ Добавить поставщика", type="primary", use_container_width=True, key=f"add_supplier_{prefix}_btn"):
             if not new_name or not new_email or not new_password:
                 st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
             else:
@@ -6937,10 +6942,12 @@ def render_main_content() -> None:
         with analysis_subtab1:
             render_analysis_tab()
         with analysis_subtab2:
-            render_supplier_settings()
+            # Передаём префикс для уникальности ключей
+            render_supplier_settings(prefix="analysis")
     
     with main_tab4:
-        render_supplier_settings()
+        # Передаём префикс для уникальности ключей
+        render_supplier_settings(prefix="main")
     
     with main_tab5:
         render_products_tab()
@@ -7080,7 +7087,6 @@ def run_analysis() -> None:
     except Exception as e:
         st.error(f"❌ Ошибка анализа: {str(e)}")
         st.session_state.logger.error(f"Ошибка анализа: {e}")
-
 
 # ===================================================================
 # БЛОК 16: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
