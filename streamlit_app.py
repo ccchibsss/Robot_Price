@@ -5768,180 +5768,179 @@ def render_gs_instructions() -> None:
 
 
 def render_gs_setup_ui() -> None:
-"""Интерфейс настройки Google Sheets с публичным доступом"""
-
-st.subheader("📊 Настройка Google Sheets")
-
-st.markdown("""
-### 🔑 Два способа подключения к Google Sheets
-
-**Способ 1 (рекомендуемый): Публичный доступ**
-- Откройте доступ к таблице: **Файл → Поделиться → Включить доступ по ссылке**
-- Выберите: **"Редактор"** для возможности изменения
-- Вставьте ID таблицы ниже
-
-**Способ 2: Сервисный аккаунт**
-- Создайте сервисный аккаунт в Google Cloud Console
-- Скачайте JSON-ключ и загрузите его
-- Предоставьте доступ сервисному аккаунту к таблице
-""")
-
-st.divider()
-
-# Выбор способа подключения
-use_public = st.radio(
-"Выберите способ подключения:",
-["🔓 Публичный доступ (рекомендуется)", "🔐 Сервисный аккаунт"],
-index=0 if st.session_state.config.use_public_access else 1,
-key="gs_auth_method"
-)
-
-st.session_state.config.use_public_access = (use_public == "🔓 Публичный доступ (рекомендуется)")
-
-# Основные настройки
-col1, col2 = st.columns([3, 1])
-
-with col1:
-sheet_id = st.text_input(
-    "📋 ID Google Sheets таблицы",
-    value=st.session_state.config.google_sheet_id,
-    placeholder="Введите ID таблицы (часть URL между /d/ и /edit)",
-    help="Например: 1A2B3C4D5E6F7G8H9I0J",
-    key="gs_sheet_id_input"
-)
-
-if sheet_id:
-    st.caption(f"🔗 https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
-
-with col2:
-sheet_name = st.text_input(
-    "📄 Название листа",
-    value=st.session_state.config.google_sheet_name,
-    placeholder="Товары",
-    key="gs_sheet_name_input"
-)
-
-# Если выбран сервисный аккаунт
-if use_public == "🔐 Сервисный аккаунт":
-st.divider()
-st.subheader("🔐 Настройка сервисного аккаунта")
-
-# Загрузка JSON-ключа
-uploaded_key = st.file_uploader(
-    "📤 Загрузите JSON-ключ сервисного аккаунта",
-    type=['json'],
-    help="Скачайте ключ из Google Cloud Console",
-    key="gs_key_upload"
-)
-
-if uploaded_key is not None:
-    # Сохраняем ключ
-    key_path = st.session_state.config.google_credentials_json
-    with open(key_path, 'wb') as f:
-        f.write(uploaded_key.read())
-    st.success(f"✅ Ключ сохранен: {key_path}")
+    """Интерфейс настройки Google Sheets с публичным доступом"""
     
-    # Проверяем ключ
-    try:
-        with open(key_path, 'r') as f:
-            key_data = json.load(f)
-            if 'client_email' in key_data:
-                st.info(f"📧 Сервисный аккаунт: {key_data['client_email']}")
-                st.markdown("""
-                **⚠️ Важно:** Предоставьте доступ этому email к вашей таблице:
-                1. Откройте таблицу
-                2. Нажмите **Поделиться**
-                3. Добавьте email: `{0}`
-                4. Выберите **Редактор**
-                """.format(key_data['client_email']))
-    except Exception as e:
-        st.error(f"❌ Ошибка проверки ключа: {e}")
-
-# Кнопка тестирования
-st.divider()
-
-col1, col2, col3 = st.columns([1, 1, 1])
-
-with col1:
-if st.button("🔗 Проверить подключение", use_container_width=True, type="primary"):
-    with st.spinner("Проверка подключения..."):
-        try:
-            # Создаем временное подключение
-            temp_db = GoogleSheetsDatabase(st.session_state.config, st.session_state.logger)
-            if temp_db.sheet:
-                st.success(f"✅ Подключение успешно! Таблица: {temp_db.sheet.title}")
-                st.info(f"📊 Колонок: {len(temp_db.df.columns) if temp_db.df is not None else 0}")
-                st.info(f"📦 Строк: {len(temp_db.df) if temp_db.df is not None else 0}")
-            else:
-                st.error("❌ Не удалось подключиться к таблице")
-        except Exception as e:
-            st.error(f"❌ Ошибка: {str(e)}")
-            st.info("💡 Проверьте:\n- ID таблицы\n- Доступ к таблице (публичный или сервисный аккаунт)")
-
-with col2:
-if st.button("💾 Сохранить настройки", use_container_width=True):
-    st.session_state.config.google_sheet_id = sheet_id
-    st.session_state.config.google_sheet_name = sheet_name
-    st.session_state.config.save()
-    st.success("✅ Настройки сохранены!")
+    st.subheader("📊 Настройка Google Sheets")
     
-    # Перезагружаем базу
-    if sheet_id:
-        try:
-            st.session_state.product_db = GoogleSheetsDatabase(
-                st.session_state.config,
-                st.session_state.logger
-            )
-            st.success("🔄 База данных перезагружена!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ Ошибка перезагрузки: {e}")
-
-with col3:
-if st.button("➕ Создать новую таблицу", use_container_width=True):
-    try:
-        temp_db = GoogleSheetsDatabase(st.session_state.config, st.session_state.logger)
-        temp_db._create_new_spreadsheet()
-        st.session_state.config.google_sheet_id = temp_db.config.google_sheet_id
-        st.session_state.config.save()
-        st.success(f"✅ Создана новая таблица: {temp_db.config.google_sheet_id}")
-        st.info(f"🔗 https://docs.google.com/spreadsheets/d/{temp_db.config.google_sheet_id}/edit")
-        st.rerun()
-    except Exception as e:
-        st.error(f"❌ Ошибка создания: {e}")
-
-# Отображение текущего статуса
-st.divider()
-st.subheader("📊 Текущий статус")
-
-try:
-if st.session_state.product_db and st.session_state.product_db.sheet:
-    col1, col2, col3 = st.columns(3)
+    st.markdown("""
+    ### 🔑 Два способа подключения к Google Sheets
+    
+    **Способ 1 (рекомендуемый): Публичный доступ**
+    - Откройте доступ к таблице: **Файл → Поделиться → Включить доступ по ссылке**
+    - Выберите: **"Редактор"** для возможности изменения
+    - Вставьте ID таблицы ниже
+    
+    **Способ 2: Сервисный аккаунт**
+    - Создайте сервисный аккаунт в Google Cloud Console
+    - Скачайте JSON-ключ и загрузите его
+    - Предоставьте доступ сервисному аккаунту к таблице
+    """)
+    
+    st.divider()
+    
+    # Выбор способа подключения
+    use_public = st.radio(
+        "Выберите способ подключения:",
+        ["🔓 Публичный доступ (рекомендуется)", "🔐 Сервисный аккаунт"],
+        index=0 if st.session_state.config.use_public_access else 1,
+        key="gs_auth_method"
+    )
+    
+    st.session_state.config.use_public_access = (use_public == "🔓 Публичный доступ (рекомендуется)")
+    
+    # Основные настройки
+    col1, col2 = st.columns([3, 1])
+    
     with col1:
-        st.metric("📄 Таблица", st.session_state.product_db.sheet.title)
-    with col2:
-        st.metric("📋 Лист", st.session_state.config.google_sheet_name)
-    with col3:
-        df = st.session_state.product_db.df
-        st.metric("📦 Товаров", len(df) if df is not None else 0)
+        sheet_id = st.text_input(
+            "📋 ID Google Sheets таблицы",
+            value=st.session_state.config.google_sheet_id,
+            placeholder="Введите ID таблицы (часть URL между /d/ и /edit)",
+            help="Например: 1A2B3C4D5E6F7G8H9I0J",
+            key="gs_sheet_id_input"
+        )
+        
+        if sheet_id:
+            st.caption(f"🔗 https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
     
-    # Показываем доступные колонки
-    if df is not None and not df.empty:
-        with st.expander("📋 Доступные колонки в таблице"):
-            col_info = []
-            for col in df.columns:
-                col_info.append({
-                    'Колонка': col,
-                    'Тип': str(df[col].dtype),
-                    'Непустых': df[col].count(),
-                    'Уникальных': df[col].nunique()
-                })
-            st.dataframe(pd.DataFrame(col_info), use_container_width=True, hide_index=True)
-else:
-    st.warning("⚠️ Нет подключения к Google Sheets")
-except Exception as e:
-st.error(f"❌ Ошибка получения статуса: {e}")
-
+    with col2:
+        sheet_name = st.text_input(
+            "📄 Название листа",
+            value=st.session_state.config.google_sheet_name,
+            placeholder="Товары",
+            key="gs_sheet_name_input"
+        )
+    
+    # Если выбран сервисный аккаунт
+    if use_public == "🔐 Сервисный аккаунт":
+        st.divider()
+        st.subheader("🔐 Настройка сервисного аккаунта")
+        
+        # Загрузка JSON-ключа
+        uploaded_key = st.file_uploader(
+            "📤 Загрузите JSON-ключ сервисного аккаунта",
+            type=['json'],
+            help="Скачайте ключ из Google Cloud Console",
+            key="gs_key_upload"
+        )
+        
+        if uploaded_key is not None:
+            # Сохраняем ключ
+            key_path = st.session_state.config.google_credentials_json
+            with open(key_path, 'wb') as f:
+                f.write(uploaded_key.read())
+            st.success(f"✅ Ключ сохранен: {key_path}")
+            
+            # Проверяем ключ
+            try:
+                with open(key_path, 'r') as f:
+                    key_data = json.load(f)
+                    if 'client_email' in key_data:
+                        st.info(f"📧 Сервисный аккаунт: {key_data['client_email']}")
+                        st.markdown("""
+                        **⚠️ Важно:** Предоставьте доступ этому email к вашей таблице:
+                        1. Откройте таблицу
+                        2. Нажмите **Поделиться**
+                        3. Добавьте email: `{0}`
+                        4. Выберите **Редактор**
+                        """.format(key_data['client_email']))
+            except Exception as e:
+                st.error(f"❌ Ошибка проверки ключа: {e}")
+    
+    # Кнопка тестирования
+    st.divider()
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        if st.button("🔗 Проверить подключение", use_container_width=True, type="primary"):
+            with st.spinner("Проверка подключения..."):
+                try:
+                    # Создаем временное подключение
+                    temp_db = GoogleSheetsDatabase(st.session_state.config, st.session_state.logger)
+                    if temp_db.sheet:
+                        st.success(f"✅ Подключение успешно! Таблица: {temp_db.sheet.title}")
+                        st.info(f"📊 Колонок: {len(temp_db.df.columns) if temp_db.df is not None else 0}")
+                        st.info(f"📦 Строк: {len(temp_db.df) if temp_db.df is not None else 0}")
+                    else:
+                        st.error("❌ Не удалось подключиться к таблице")
+                except Exception as e:
+                    st.error(f"❌ Ошибка: {str(e)}")
+                    st.info("💡 Проверьте:\n- ID таблицы\n- Доступ к таблице (публичный или сервисный аккаунт)")
+    
+    with col2:
+        if st.button("💾 Сохранить настройки", use_container_width=True):
+            st.session_state.config.google_sheet_id = sheet_id
+            st.session_state.config.google_sheet_name = sheet_name
+            st.session_state.config.save()
+            st.success("✅ Настройки сохранены!")
+            
+            # Перезагружаем базу
+            if sheet_id:
+                try:
+                    st.session_state.product_db = GoogleSheetsDatabase(
+                        st.session_state.config,
+                        st.session_state.logger
+                    )
+                    st.success("🔄 База данных перезагружена!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Ошибка перезагрузки: {e}")
+    
+    with col3:
+        if st.button("➕ Создать новую таблицу", use_container_width=True):
+            try:
+                temp_db = GoogleSheetsDatabase(st.session_state.config, st.session_state.logger)
+                temp_db._create_new_spreadsheet()
+                st.session_state.config.google_sheet_id = temp_db.config.google_sheet_id
+                st.session_state.config.save()
+                st.success(f"✅ Создана новая таблица: {temp_db.config.google_sheet_id}")
+                st.info(f"🔗 https://docs.google.com/spreadsheets/d/{temp_db.config.google_sheet_id}/edit")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Ошибка создания: {e}")
+    
+    # Отображение текущего статуса
+    st.divider()
+    st.subheader("📊 Текущий статус")
+    
+    try:
+        if st.session_state.product_db and st.session_state.product_db.sheet:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📄 Таблица", st.session_state.product_db.sheet.title)
+            with col2:
+                st.metric("📋 Лист", st.session_state.config.google_sheet_name)
+            with col3:
+                df = st.session_state.product_db.df
+                st.metric("📦 Товаров", len(df) if df is not None else 0)
+            
+            # Показываем доступные колонки
+            if df is not None and not df.empty:
+                with st.expander("📋 Доступные колонки в таблице"):
+                    col_info = []
+                    for col in df.columns:
+                        col_info.append({
+                            'Колонка': col,
+                            'Тип': str(df[col].dtype),
+                            'Непустых': df[col].count(),
+                            'Уникальных': df[col].nunique()
+                        })
+                    st.dataframe(pd.DataFrame(col_info), use_container_width=True, hide_index=True)
+        else:
+            st.warning("⚠️ Нет подключения к Google Sheets")
+    except Exception as e:
+        st.error(f"❌ Ошибка получения статуса: {e}")
 
 # ===================================================================
 # БЛОК 15: ИНТЕРФЕЙС STREAMLIT - ОБУЧЕНИЕ ПРАЙСА
