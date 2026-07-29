@@ -6700,7 +6700,101 @@ def render_mapping_constructor_ui() -> None:
     suppliers = st.session_state.config.suppliers
     supplier_names = [s.get('name', 'Unknown') for s in suppliers]
     if not supplier_names:
-        st.warning("⚠️ Сначала добавьте поставщика в разделе 'Поставщики'")
+        st.warning("⚠️ У вас еще нет поставщиков. Создайте поставщика для настройки маппинга.")
+        with st.expander("➕ БЫСТРОЕ СОЗДАНИЕ ПОСТАВЩИКА", expanded=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_name = st.text_input("Название поставщика*", key="quick_supplier_name")
+                new_email = st.text_input("Email*", key="quick_supplier_email")
+                new_password = st.text_input("Пароль*", type="password", key="quick_supplier_password")
+            with col2:
+                new_imap = st.text_input("IMAP сервер", value="imap.mail.ru", key="quick_supplier_imap")
+                new_port = st.number_input("IMAP порт", value=993, step=1, key="quick_supplier_port")
+                new_enabled = st.checkbox("Активен", value=True, key="quick_supplier_enabled")
+            if st.button("✅ Создать поставщика", type="primary", use_container_width=True, key="quick_create_supplier_btn"):
+                if not new_name or not new_email or not new_password:
+                    st.error("❌ Заполните обязательные поля (Название, Email, Пароль)")
+                else:
+                    new_supplier = SupplierConfig(
+                        name=new_name,
+                        email=new_email,
+                        email_password=new_password,
+                        imap_server=new_imap,
+                        imap_port=new_port,
+                        enabled=new_enabled
+                    )
+                    st.session_state.config.suppliers.append(new_supplier.to_dict())
+                    st.session_state.config._save_suppliers()
+                    st.success(f"✅ Поставщик '{new_name}' создан!")
+                    st.balloons()
+                    time.sleep(1)
+                    st.rerun()
+        st.info("💡 После создания поставщика обновите страницу или перейдите на вкладку 'Аналитика прайсов' → 'Поставщики' для расширенных настроек.")
+        st.divider()
+        st.markdown("### 📤 ИЛИ ЗАГРУЗИТЕ ФАЙЛ ДЛЯ ТЕСТИРОВАНИЯ")
+        st.caption("Вы можете загрузить файл и посмотреть его структуру, даже без создания поставщика. Маппинг не будет сохранен до создания поставщика.")
+        if 'file_loaded_main' not in st.session_state:
+            st.session_state.file_loaded_main = False
+            st.session_state.file_content_main = None
+            st.session_state.file_filename_main = None
+            st.session_state.df_main = None
+            st.session_state.columns_main = None
+            st.session_state.metadata_main = None
+        uploaded_file = st.file_uploader(
+            "Выберите файл прайса для предпросмотра",
+            type=['xlsx', 'xls', 'csv', 'xml', 'json', 'txt', 'xlsm', 'ods', 'xlsb'],
+            help="Загрузите файл прайса для просмотра структуры",
+            key="main_file_uploader_no_supplier"
+        )
+        if uploaded_file is not None:
+            try:
+                file_content = uploaded_file.read()
+                file_filename = uploaded_file.name
+                mapping_constructor.save_uploaded_file(file_content, file_filename)
+                st.success(f"✅ Файл загружен: `{file_filename}` ({len(file_content) / 1024:.1f} KB)")
+                with st.spinner("Анализ файла..."):
+                    df, columns, metadata = mapping_constructor.preview_file(file_content, file_filename)
+                    if df.empty:
+                        st.error("❌ Файл пуст или не содержит данных")
+                        st.stop()
+                    st.session_state.file_loaded_main = True
+                    st.session_state.file_content_main = file_content
+                    st.session_state.file_filename_main = file_filename
+                    st.session_state.df_main = df
+                    st.session_state.columns_main = columns
+                    st.session_state.metadata_main = metadata
+                    st.success(f"✅ Файл успешно распарсен: {len(df)} строк, {len(columns)} колонок")
+                    st.subheader("📋 Предпросмотр данных")
+                    st.dataframe(df.head(20), use_container_width=True, height=400)
+                    with st.expander("📊 Информация о файле", expanded=True):
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("📄 Строк", metadata.get('row_count', 0))
+                        with col2:
+                            st.metric("📊 Колонок", metadata.get('column_count', 0))
+                        with col3:
+                            st.metric("💾 Размер", metadata.get('file_size_formatted', '0 KB'))
+                        with col4:
+                            st.metric("📝 Кодировка", metadata.get('encoding', 'unknown'))
+                        if metadata.get('column_types'):
+                            st.markdown("**Типы колонок (автоопределение):**")
+                            type_cols = st.columns(3)
+                            for i, (col, col_type) in enumerate(metadata['column_types'].items()):
+                                type_emoji = {
+                                    'integer': '🔢',
+                                    'decimal': '💲',
+                                    'short_text': '📝',
+                                    'text': '📄',
+                                    'long_text': '📑',
+                                    'empty': '🫗'
+                                }.get(col_type, '❓')
+                                with type_cols[i % 3]:
+                                    st.markdown(f"{type_emoji} **{col}**: *{col_type}*")
+                    st.info("💡 Чтобы сохранить маппинг, создайте поставщика выше и загрузите файл снова.")
+            except Exception as e:
+                st.error(f"❌ Ошибка загрузки файла: {str(e)}")
+                st.exception(e)
+                st.session_state.file_loaded_main = False
         return
     selected_supplier = st.selectbox(
         "👤 Выберите поставщика для настройки",
