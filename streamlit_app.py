@@ -1426,49 +1426,58 @@ class GoogleSheetsDatabase:
         try:
             self.logger.info("Подключение к Google Sheets...")
             
+            # Проверяем, указан ли ID таблицы
+            if not self.config.google_sheet_id:
+                self.logger.warning("ID Google Sheets не указан")
+                self._create_new_spreadsheet()
+                return
+            
             # ПРОВЕРЯЕМ: Используем публичный доступ
-            if self.config.google_sheet_id and self.config.use_public_access:
-                self.logger.info("Используем публичный доступ к таблице")
+            if self.config.use_public_access:
+                self.logger.info("Попытка подключения к публичной таблице...")
                 
-                # Создаем клиент без авторизации для публичного доступа
-                self.client = gspread.Client(auth=None)
-                self.client.session = requests.Session()
-                
-                # Пытаемся открыть таблицу по ID
                 try:
+                    # Создаем клиент без авторизации для публичного доступа
+                    self.client = gspread.Client(auth=None)
+                    
+                    # Пытаемся открыть таблицу по ID
                     self.sheet = self.client.open_by_key(self.config.google_sheet_id)
                     self.logger.success(f"Подключение к публичной таблице: {self.sheet.title}")
                     return
+                    
+                except gspread.exceptions.SpreadsheetNotFound:
+                    self.logger.error(f"Таблица {self.config.google_sheet_id} не найдена или нет доступа")
+                    raise Exception("Таблица не найдена. Проверьте ID и доступ.")
+                    
+                except gspread.exceptions.APIError as e:
+                    self.logger.error(f"Ошибка API при публичном доступе: {e}")
+                    self.logger.info("Пробуем подключиться через сервисный аккаунт...")
+                    
                 except Exception as e:
-                    self.logger.warning(f"Не удалось открыть публичную таблицу: {e}")
-                    # Если публичный доступ не работает, пробуем через сервисный аккаунт
+                    self.logger.error(f"Ошибка публичного доступа: {e}")
+                    self.logger.info("Пробуем подключиться через сервисный аккаунт...")
             
             # ПРОБУЕМ: Через сервисный аккаунт (если есть)
             if os.path.exists(self.config.google_credentials_json):
                 self.logger.info("Используем сервисный аккаунт")
-                scope = self.config.google_scope
-                creds = ServiceAccountCredentials.from_json_keyfile_name(
-                    self.config.google_credentials_json, 
-                    scope
-                )
-                self.client = gspread.authorize(creds)
-                
-                if self.config.google_sheet_id:
-                    try:
+                try:
+                    scope = self.config.google_scope
+                    creds = ServiceAccountCredentials.from_json_keyfile_name(
+                        self.config.google_credentials_json, 
+                        scope
+                    )
+                    self.client = gspread.authorize(creds)
+                    
+                    if self.config.google_sheet_id:
                         self.sheet = self.client.open_by_key(self.config.google_sheet_id)
                         self.logger.success(f"Подключение через сервисный аккаунт: {self.sheet.title}")
                         return
-                    except Exception as e:
-                        self.logger.warning(f"Не удалось открыть таблицу через сервисный аккаунт: {e}")
+                except Exception as e:
+                    self.logger.error(f"Ошибка подключения через сервисный аккаунт: {e}")
             
-            # НЕТ ДОСТУПА: Создаем новую таблицу или показываем ошибку
-            if not self.config.google_sheet_id:
-                self.logger.warning("ID Google Sheets не указан, создаем новую таблицу")
-                self._create_new_spreadsheet()
-                return
-            else:
-                self.logger.error("Нет доступа к таблице. Проверьте настройки.")
-                raise Exception("Нет доступа к Google Sheets")
+            # Если ничего не сработало
+            self.logger.error("Не удалось подключиться к Google Sheets")
+            raise Exception("Не удалось подключиться к таблице. Проверьте ID таблицы и настройки доступа.")
             
         except Exception as e:
             self.logger.error(f"Ошибка подключения к Google Sheets: {e}")
@@ -1570,6 +1579,7 @@ class GoogleSheetsDatabase:
             
             if not self.config.google_sheet_id:
                 self.logger.warning("ID Google Sheets не указан")
+                self.df = pd.DataFrame()
                 return
             
             # Проверяем доступность таблицы с повторными попытками
@@ -1583,8 +1593,16 @@ class GoogleSheetsDatabase:
                         time.sleep(2 ** attempt)
                     else:
                         raise
+                except gspread.exceptions.SpreadsheetNotFound:
+                    self.logger.error(f"Таблица {self.config.google_sheet_id} не найдена")
+                    self.df = pd.DataFrame()
+                    return
                 except Exception as e:
-                    raise
+                    if attempt < 2:
+                        self.logger.warning(f"Ошибка, повторная попытка {attempt+1}/3: {e}")
+                        time.sleep(2 ** attempt)
+                    else:
+                        raise
             
             # Проверяем наличие листа
             try:
@@ -1594,7 +1612,7 @@ class GoogleSheetsDatabase:
                 self._create_default_sheet()
                 return
             
-            # Загружаем данные с ограничением по размеру
+            # Загружаем данные
             try:
                 all_values = worksheet.get_all_values()
             except gspread.exceptions.APIError as e:
@@ -1614,7 +1632,7 @@ class GoogleSheetsDatabase:
             headers = [h.strip().lower() for h in all_values[0]]
             rows = all_values[1:]
             
-            # Создаем DataFrame с обработкой ошибок
+            # Создаем DataFrame
             self.df = pd.DataFrame(rows, columns=headers)
             
             # Кэшируем результат
@@ -1625,25 +1643,25 @@ class GoogleSheetsDatabase:
             
             self.logger.info(f"Загружено {len(self.df)} товаров из Google Sheets")
             
-        except gspread.exceptions.SpreadsheetNotFound:
-            self.logger.error(f"Таблица {self.config.google_sheet_id} не найдена")
-            self._create_new_spreadsheet()
-        except gspread.exceptions.APIError as e:
-            self.logger.error(f"Ошибка API Google: {e}")
-            # Пробуем восстановить подключение
-            self.client = None
-            self._connect()
         except Exception as e:
             self.logger.error(f"Ошибка загрузки данных из Google Sheets: {e}")
-            # Создаем пустой DataFrame для продолжения работы
             self.df = pd.DataFrame()
     
     def _create_new_spreadsheet(self) -> None:
         """Создание новой таблицы Google Sheets"""
         try:
             if not self.client:
-                self.logger.error("Нет подключения к Google Sheets")
-                return
+                # Пытаемся создать клиент для создания таблицы
+                if os.path.exists(self.config.google_credentials_json):
+                    scope = self.config.google_scope
+                    creds = ServiceAccountCredentials.from_json_keyfile_name(
+                        self.config.google_credentials_json, 
+                        scope
+                    )
+                    self.client = gspread.authorize(creds)
+                else:
+                    self.logger.error("Для создания таблицы нужен сервисный аккаунт")
+                    return
             
             spreadsheet = self.client.create('База товаров робота')
             self.config.google_sheet_id = spreadsheet.id
@@ -5720,50 +5738,50 @@ class PriceRobot:
             }
         
         return health
-
-
-# ===================================================================
+        # ===================================================================
 # БЛОК 14: ИНТЕРФЕЙС STREAMLIT - НАСТРОЙКА GOOGLE SHEETS
 # ===================================================================
 
 def render_gs_instructions() -> None:
     """Интерактивная инструкция по настройке Google Sheets"""
     
-    with st.expander("📖 ПОДРОБНАЯ ИНСТРУКЦИЯ ПО НАСТРОЙКЕ GOOGLE SHEETS", expanded=False):
+    with st.expander("📖 ПОДРОБНАЯ ИНСТРУКЦИЯ ПО НАСТРОЙКЕ GOOGLE SHEETS", expanded=True):
         st.markdown("""
         ### 🔓 Как открыть доступ к Google Sheets
         
-        #### Шаг 1: Создайте таблицу
+        #### ШАГ 1: Создайте таблицу
         1. Перейдите на [Google Sheets](https://sheets.google.com)
-        2. Создайте новую таблицу или откройте существующую
+        2. Создайте новую таблицу
         3. Назовите лист **"Товары"** (или укажите другое имя)
         
-        #### Шаг 2: Откройте доступ
+        #### ШАГ 2: Откройте доступ (ВАЖНО!)
         1. Нажмите кнопку **"Поделиться"** (синяя кнопка в правом верхнем углу)
         2. Внизу нажмите **"Изменить"** (в блоке "Общий доступ")
-        3. Выберите **"Включено"** - у всех, у кого есть ссылка
-        4. Выберите роль **"Редактор"** (чтобы робот мог изменять данные)
-        5. Нажмите **"Сохранить"** и скопируйте **ссылку**
+        3. Выберите **"Включено"** - **у всех, у кого есть ссылка**
+        4. Выберите роль **"Редактор"** (обязательно!)
+        5. Нажмите **"Сохранить"**
+        6. Скопируйте **ссылку** на таблицу
         
-        #### Шаг 3: Получите ID таблицы
-        Из ссылки возьмите ID:
+        #### ШАГ 3: Получите ID таблицы
+        Из ссылки возьмите ID (часть между /d/ и /edit):
         Скопируйте этот ID и вставьте в поле выше.
 
-        #### Шаг 4: Проверьте
+        #### ШАГ 4: Проверьте
         1. Вставьте ID в поле выше
         2. Нажмите **"Проверить подключение"**
         3. Если все зеленое - вы готовы к работе!
+
+        ### ⚠️ Частые ошибки
+        - **"Таблица не найдена"** → неправильный ID
+        - **"Нет доступа"** → не открыт доступ по ссылке
+        - **"Только чтение"** → выбрана роль "Комментатор" или "Читатель", нужно "Редактор"
+        - **"Ошибка API"** → превышен лимит запросов, подождите минуту
 
         ### 💡 Советы
         - Названия колонок в таблице могут быть любыми (робот сам поймет)
         - Обязательные колонки: **Артикул** и **Цена базовая**
         - Рекомендуемые колонки: **Остаток**, **Бренд**, **Название**
         - При первом запуске робот создаст необходимые колонки автоматически
-
-        ### ⚠️ Важно
-        - Если вы используете **публичный доступ**, никаких ключей не нужно!
-        - Это самый простой способ подключения
-        - Все изменения сохраняются в реальном времени
         """)
 
 
@@ -5866,17 +5884,48 @@ def render_gs_setup_ui() -> None:
         if st.button("🔗 Проверить подключение", use_container_width=True, type="primary"):
             with st.spinner("Проверка подключения..."):
                 try:
+                    # Сохраняем ID перед проверкой
+                    if sheet_id:
+                        st.session_state.config.google_sheet_id = sheet_id
+                        st.session_state.config.google_sheet_name = sheet_name
+                        st.session_state.config.use_public_access = (use_public == "🔓 Публичный доступ (рекомендуется)")
+                        st.session_state.config.save()
+                    
                     # Создаем временное подключение
                     temp_db = GoogleSheetsDatabase(st.session_state.config, st.session_state.logger)
+                    
                     if temp_db.sheet:
                         st.success(f"✅ Подключение успешно! Таблица: {temp_db.sheet.title}")
                         st.info(f"📊 Колонок: {len(temp_db.df.columns) if temp_db.df is not None else 0}")
                         st.info(f"📦 Строк: {len(temp_db.df) if temp_db.df is not None else 0}")
+                        
+                        # Показываем список колонок
+                        if temp_db.df is not None and not temp_db.df.empty:
+                            with st.expander("📋 Доступные колонки"):
+                                st.dataframe(
+                                    pd.DataFrame({
+                                        'Колонка': temp_db.df.columns,
+                                        'Тип': [str(temp_db.df[col].dtype) for col in temp_db.df.columns],
+                                        'Непустых': [temp_db.df[col].count() for col in temp_db.df.columns]
+                                    }),
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
                     else:
                         st.error("❌ Не удалось подключиться к таблице")
+                        st.info("💡 Проверьте:\n- ID таблицы (должен быть правильным)\n- Доступ к таблице (публичный или сервисный аккаунт)\n- Для публичного доступа: ссылка должна быть доступна всем")
+                        
+                except gspread.exceptions.SpreadsheetNotFound:
+                    st.error("❌ Таблица не найдена!")
+                    st.info("💡 Проверьте ID таблицы. Он должен быть частью URL:\n`https://docs.google.com/spreadsheets/d/ВАШ_ID/edit`")
+                    
+                except gspread.exceptions.APIError as e:
+                    st.error(f"❌ Ошибка API Google: {str(e)[:200]}")
+                    st.info("💡 Проверьте:\n- Доступ к таблице (должен быть открыт)\n- Для публичного доступа: выберите 'Включено - у всех, у кого есть ссылка'\n- Роль: 'Редактор'")
+                    
                 except Exception as e:
-                    st.error(f"❌ Ошибка: {str(e)}")
-                    st.info("💡 Проверьте:\n- ID таблицы\n- Доступ к таблице (публичный или сервисный аккаунт)")
+                    st.error(f"❌ Ошибка: {str(e)[:200]}")
+                    st.info("💡 Попробуйте:\n1. Проверьте ID таблицы\n2. Убедитесь, что таблица существует\n3. Откройте доступ по ссылке с правами редактирования")
     
     with col2:
         if st.button("💾 Сохранить настройки", use_container_width=True):
